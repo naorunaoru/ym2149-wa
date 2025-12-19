@@ -1,0 +1,62 @@
+/* CSS Variables for theming */
+.player {
+  --ym-color-bg-primary: #1a1a2e;
+  --ym-color-bg-secondary: #16213e;
+  --ym-color-accent: #00d4ff;
+  --ym-color-accent-hover: #00b8db;
+  --ym-color-text-primary: #eee;
+  --ym-color-text-secondary: #888;
+  --ym-color-text-muted: #666;
+  --ym-color-text-dim: #555;
+  --ym-color-border: rgba(255, 255, 255, 0.1);
+  --ym-color-surface: rgba(255, 255, 255, 0.05);
+  --ym-color-surface-hover: rgba(255, 255, 255, 0.1);
+
+  --ym-font-sans: system-ui, -apple-system, sans-serif;
+  --ym-font-mono: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+
+  --ym-radius-sm: 4px;
+  --ym-radius-md: 8px;
+  --ym-radius-lg: 16px;
+  --ym-radius-full: 50%;
+
+  --ym-transition-fast: 0.1s ease;
+  --ym-transition-normal: 0.15s ease;
+
+  /* Map to internal var names used by child components */
+  --color-bg-primary: var(--ym-color-bg-primary);
+  --color-bg-secondary: var(--ym-color-bg-secondary);
+  --color-accent: var(--ym-color-accent);
+  --color-accent-hover: var(--ym-color-accent-hover);
+  --color-text-primary: var(--ym-color-text-primary);
+  --color-text-secondary: var(--ym-color-text-secondary);
+  --color-text-muted: var(--ym-color-text-muted);
+  --color-text-dim: var(--ym-color-text-dim);
+  --color-border: var(--ym-color-border);
+  --color-surface: var(--ym-color-surface);
+  --color-surface-hover: var(--ym-color-surface-hover);
+  --font-sans: var(--ym-font-sans);
+  --font-mono: var(--ym-font-mono);
+  --radius-sm: var(--ym-radius-sm);
+  --radius-md: var(--ym-radius-md);
+  --radius-lg: var(--ym-radius-lg);
+  --radius-full: var(--ym-radius-full);
+  --transition-fast: var(--ym-transition-fast);
+  --transition-normal: var(--ym-transition-normal);
+
+  font-family: var(--ym-font-sans);
+  color: var(--ym-color-text-primary);
+  background: rgba(22, 33, 62, 0.8);
+  border-radius: var(--ym-radius-lg);
+  padding: 24px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--ym-color-surface);
+}
+
+.status {
+  text-align: center;
+  margin-top: 16px;
+  color: var(--ym-color-text-dim);
+  font-size: 0.8em;
+}

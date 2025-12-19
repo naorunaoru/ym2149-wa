@@ -60,7 +60,7 @@ export class YM2149 {
     if (this.workletReady) return;
 
     // Load worklet from separate file (Vite handles the URL correctly)
-    const workletUrl = new URL('./ym2149-processor.js', import.meta.url);
+    const workletUrl = new URL('./processor.js', import.meta.url);
     await this.ctx.audioWorklet.addModule(workletUrl);
 
     this.workletNode = new AudioWorkletNode(this.ctx, 'ym2149-processor', {

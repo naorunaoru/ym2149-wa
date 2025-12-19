@@ -2,7 +2,7 @@
  * YM file replayer using AudioWorklet-based YM2149 emulation
  */
 
-import { YmFile } from './ym-parser';
+import { YmFile } from './parser';
 import { YM2149 } from './ym2149';
 import { decodeEffectsYm5, decodeEffectsYm6, Effect } from './effects';
 

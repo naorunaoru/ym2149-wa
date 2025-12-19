@@ -1,0 +1,33 @@
+.section {
+  margin-bottom: 20px;
+}
+
+.bar {
+  height: 4px;
+  background: var(--color-border);
+  border-radius: 2px;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition: height var(--transition-normal);
+}
+
+.bar:hover {
+  height: 6px;
+}
+
+.fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--color-accent), var(--color-accent-hover));
+  border-radius: 2px;
+  transition: width 0.1s linear;
+}
+
+.timeRow {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+  color: var(--color-text-muted);
+}

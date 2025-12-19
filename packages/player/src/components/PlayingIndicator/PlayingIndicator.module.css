@@ -1,0 +1,16 @@
+.indicator {
+  display: flex;
+  gap: 2px;
+  align-items: flex-end;
+  height: 16px;
+}
+
+.indicator span {
+  width: 3px;
+  height: 100%;
+  background: var(--color-accent);
+  border-radius: 1px;
+  transform-origin: bottom;
+  transform: scaleY(0.2);
+  transition: transform 0.05s ease-out;
+}

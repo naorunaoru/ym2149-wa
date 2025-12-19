@@ -1,15 +1,15 @@
 {
   "name": "ym2149-wa",
   "version": "0.1.0",
+  "private": true,
   "description": "YM2149 PSG emulation using Web Audio API",
-  "type": "module",
+  "workspaces": ["packages/*"],
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview"
+    "dev": "npm run dev -w @ym2149/demo",
+    "build": "npm run build -w @ym2149/demo",
+    "preview": "npm run preview -w @ym2149/demo"
   },
   "devDependencies": {
-    "typescript": "^5.3.3",
-    "vite": "^5.4.11"
+    "typescript": "^5.3.3"
   }
 }

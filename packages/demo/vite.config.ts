@@ -1,12 +1,15 @@
 import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
 
 export default defineConfig(({ command }) => ({
+  plugins: [react()],
   // Only use base path for production builds (GitHub Pages)
   base: command === 'build' ? '/ym2149-wa/' : '/',
   root: '.',
   publicDir: 'public',
   build: {
-    outDir: 'dist',
+    outDir: '../../dist',
+    emptyOutDir: true,
     target: 'esnext',
   },
   server: {
@@ -18,7 +21,6 @@ export default defineConfig(({ command }) => ({
       'Cross-Origin-Embedder-Policy': 'require-corp',
     },
   },
-  // Preview server also needs these headers
   preview: {
     headers: {
       'Cross-Origin-Opener-Policy': 'same-origin',

@@ -1,0 +1,60 @@
+.transport {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: 20px;
+}
+
+.button {
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: 12px;
+  border-radius: var(--radius-full);
+  transition: all var(--transition-normal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.button:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  background: var(--color-surface-hover);
+}
+
+.button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.button svg {
+  width: 24px;
+  height: 24px;
+  fill: currentColor;
+}
+
+.playButton {
+  background: var(--color-accent);
+  color: var(--color-bg-primary);
+  width: 56px;
+  height: 56px;
+}
+
+.playButton:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+  color: var(--color-bg-primary);
+}
+
+.playButton:disabled {
+  background: #333;
+  opacity: 0.5;
+}
+
+.playButton svg {
+  width: 28px;
+  height: 28px;
+}
