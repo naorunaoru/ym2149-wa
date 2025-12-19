@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YM2149 Web Audio</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      margin: 0;
+      padding: 20px;
+      min-height: 100vh;
+    }
+    h1 { color: #00d4ff; margin-bottom: 0.5em; }
+    .subtitle { color: #888; margin-bottom: 2em; }
+
+    .player-section {
+      background: #16213e;
+      border-radius: 8px;
+      padding: 24px;
+      max-width: 700px;
+    }
+
+    .song-list {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+    .song-btn {
+      background: #0f3460;
+      color: #eee;
+      border: 1px solid #00d4ff33;
+      padding: 8px 14px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.9em;
+      transition: all 0.15s;
+    }
+    .song-btn:hover {
+      background: #1a4a7a;
+      border-color: #00d4ff;
+    }
+    .song-btn.active {
+      background: #00d4ff;
+      color: #1a1a2e;
+      border-color: #00d4ff;
+      font-weight: 500;
+    }
+
+    .song-info {
+      margin-bottom: 20px;
+      padding: 16px;
+      background: #0f3460;
+      border-radius: 6px;
+    }
+    .song-info h3 {
+      margin: 0 0 8px;
+      color: #00d4ff;
+      font-size: 1.1em;
+    }
+    .song-meta {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+    .song-meta p {
+      margin: 0;
+      font-size: 0.85em;
+      color: #aaa;
+    }
+    .song-meta span { color: #eee; }
+
+    .transport {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    .transport button {
+      background: #00d4ff;
+      color: #1a1a2e;
+      border: none;
+      padding: 10px 24px;
+      border-radius: 6px;
+      font-size: 0.95em;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .transport button:hover { background: #00a8cc; }
+    .transport button:disabled {
+      background: #333;
+      cursor: not-allowed;
+      color: #666;
+    }
+
+    .progress-container {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .progress-bar {
+      flex: 1;
+      height: 6px;
+      background: #0f3460;
+      border-radius: 3px;
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+    }
+    .progress-bar:hover { height: 8px; }
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #00d4ff, #00a8cc);
+      border-radius: 3px;
+      width: 0%;
+      transition: width 0.1s linear;
+    }
+    .time-display {
+      font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+      font-size: 0.85em;
+      color: #00d4ff;
+      min-width: 90px;
+      text-align: right;
+    }
+
+    #status {
+      margin-top: 20px;
+      color: #666;
+      font-size: 0.85em;
+    }
+
+    .footer {
+      margin-top: 40px;
+      padding-top: 20px;
+      border-top: 1px solid #ffffff11;
+      color: #555;
+      font-size: 0.8em;
+      max-width: 700px;
+    }
+    .footer a { color: #00d4ff; text-decoration: none; }
+    .footer a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <h1>YM2149 Web Audio</h1>
+  <p class="subtitle">Atari ST / ZX Spectrum chiptune player using Web Audio API</p>
+
+  <div class="player-section">
+    <div class="song-list">
+      <button class="song-btn" data-file="Prelude.ym">Prelude</button>
+      <button class="song-btn" data-file="Scout.ym">Scout</button>
+      <button class="song-btn" data-file="ND-Toxygene.ym">Toxygene</button>
+      <button class="song-btn" data-file="Wings2.ym">Wings 2</button>
+      <button class="song-btn" data-file="LethalXcess1.ym">Lethal Xcess</button>
+      <button class="song-btn" data-file="SynthDream5.ym">Synth Dream</button>
+      <button class="song-btn" data-file="Steps.ym">Steps</button>
+      <button class="song-btn" data-file="Gritty.ym">Gritty</button>
+      <button class="song-btn" data-file="Credits.ym">Credits</button>
+    </div>
+
+    <div class="song-info" id="songInfo" style="display: none;">
+      <h3 id="songTitle">-</h3>
+      <div class="song-meta">
+        <p>Author: <span id="songAuthor">-</span></p>
+        <p>Format: <span id="songFormat">-</span></p>
+        <p>Frames: <span id="songFrames">-</span></p>
+      </div>
+    </div>
+
+    <div class="transport">
+      <button id="playBtn" disabled>Play</button>
+      <button id="pauseBtn" disabled>Pause</button>
+      <button id="stopBtn" disabled>Stop</button>
+    </div>
+
+    <div class="progress-container">
+      <div class="progress-bar" id="progressBar">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+      <div class="time-display">
+        <span id="currentTime">00:00</span> / <span id="totalTime">00:00</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="status"></div>
+
+  <div class="footer">
+    <p>
+      YM2149/AY-3-8912 emulation using Web Audio OscillatorNode (square waves) and GainNode (volume envelope).
+    </p>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
