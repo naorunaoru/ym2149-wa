@@ -1,6 +1,8 @@
 import { defineConfig } from 'vite';
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
+  // Only use base path for production builds (GitHub Pages)
+  base: command === 'build' ? '/ym2149-wa/' : '/',
   root: '.',
   publicDir: 'public',
   build: {
@@ -11,4 +13,4 @@ export default defineConfig({
     port: 3000,
     open: true,
   },
-});
+}));

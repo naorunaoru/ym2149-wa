@@ -1,10 +1,10 @@
 /**
- * YM file replayer using Web Audio API
+ * YM file replayer using AudioWorklet-based YM2149 emulation
  */
 
 import { YmFile } from './ym-parser';
 import { YM2149 } from './ym2149';
-import { EnvelopeGenerator } from './envelope';
+import { decodeEffectsYm5, decodeEffectsYm6, Effect } from './effects';
 
 export type ReplayerState = 'stopped' | 'playing' | 'paused';
 
@@ -19,24 +19,30 @@ export interface ReplayerCallbacks {
  */
 export class YmReplayer {
   private ym: YM2149;
-  private envelope: EnvelopeGenerator;
   private ymFile: YmFile | null = null;
   private currentFrame = 0;
   private state: ReplayerState = 'stopped';
   private intervalId: number | null = null;
   private callbacks: ReplayerCallbacks = {};
-  private ticksPerFrame = 5000;  // Will be recalculated on load
-  private internalClock = 250000;  // Will be recalculated on load
-  private currentEnvShape = 0;
-  private currentEnvPeriod = 0;
+
+  // Effect tracking state
+  private activeSid: [boolean, boolean, boolean] = [false, false, false];
+  private activeDrum: [boolean, boolean, boolean] = [false, false, false];
+  private activeSyncBuzzer = false;
 
   constructor() {
     this.ym = new YM2149();
-    this.envelope = new EnvelopeGenerator();
   }
 
   get audioContext(): AudioContext {
     return this.ym.audioContext;
+  }
+
+  /**
+   * Set master volume (0.0 to 1.0)
+   */
+  setMasterVolume(volume: number): void {
+    this.ym.setMasterVolume(volume);
   }
 
   setCallbacks(callbacks: ReplayerCallbacks): void {
@@ -46,114 +52,30 @@ export class YmReplayer {
   /**
    * Load a YM file for playback
    */
-  load(ymFile: YmFile): void {
-    this.stop();
+  async load(ymFile: YmFile): Promise<void> {
+    await this.stop();
+
+    // Reset AudioWorklet generators to prevent audio from previous song
+    this.ym.reset();
+
     this.ymFile = ymFile;
     this.currentFrame = 0;
-    this.envelope.reset();
 
-    // Calculate internal clock from master clock
-    this.internalClock = ymFile.header.masterClock / 8;
+    // Set internal clock from YM file's master clock
+    const internalClock = ymFile.header.masterClock / 8;
+    this.ym.setInternalClock(internalClock);
 
-    // Calculate internal clock ticks per frame based on file's frame rate and master clock
-    this.ticksPerFrame = EnvelopeGenerator.ticksPerFrame(
-      ymFile.header.frameRate,
-      ymFile.header.masterClock
-    );
+    // Load DigiDrum samples if present
+    if (ymFile.digidrums.length > 0) {
+      this.ym.loadDrumSamples(ymFile.digidrums);
+    }
 
-    // Reset envelope state
-    this.currentEnvShape = 0;
-    this.currentEnvPeriod = 0;
-
-    // Debug: Analyze R13 retrigger pattern
-    this.analyzeEnvelopePattern(ymFile);
+    // Reset effect tracking
+    this.activeSid = [false, false, false];
+    this.activeDrum = [false, false, false];
+    this.activeSyncBuzzer = false;
 
     this.notifyFrameChange();
-  }
-
-  /**
-   * Debug: Analyze envelope retrigger pattern in the YM file
-   */
-  private analyzeEnvelopePattern(ymFile: YmFile): void {
-    let r13Writes = 0;
-    let r13Values: Record<number, number> = {};
-
-    for (let i = 0; i < Math.min(ymFile.header.frameCount, 500); i++) {
-      const r13 = ymFile.frames[i][13];
-      r13Values[r13] = (r13Values[r13] || 0) + 1;
-      if (r13 !== 0xff) {
-        r13Writes++;
-      }
-    }
-
-    const frameRate = ymFile.header.frameRate;
-    const retriggersPerSec = (r13Writes / 500) * frameRate;
-
-    console.log('=== Envelope Analysis (first 500 frames) ===');
-    console.log('Master clock:', ymFile.header.masterClock);
-    console.log('Frame rate:', frameRate);
-    console.log('Ticks per frame:', this.ticksPerFrame);
-    console.log('R13 writes (non-0xFF):', r13Writes, '/', 500);
-    console.log('Estimated retrigger rate:', retriggersPerSec.toFixed(1), 'Hz');
-    console.log('R13 value distribution:', r13Values);
-
-    // Also check envelope period values
-    const periods: number[] = [];
-    for (let i = 0; i < Math.min(ymFile.header.frameCount, 100); i++) {
-      const period = ymFile.frames[i][11] | (ymFile.frames[i][12] << 8);
-      if (period > 0) periods.push(period);
-    }
-    if (periods.length > 0) {
-      const avgPeriod = periods.reduce((a, b) => a + b, 0) / periods.length;
-      const internalClock = ymFile.header.masterClock / 8;
-      const envCycleFreq = internalClock / (avgPeriod * 64);
-      console.log('Average envelope period:', avgPeriod.toFixed(0));
-      console.log('Envelope cycle frequency:', envCycleFreq.toFixed(1), 'Hz');
-    }
-    console.log('============================================');
-
-    // Analyze channel usage patterns for first 100 frames
-    console.log('=== Channel Analysis (first 100 frames) ===');
-    const channelInfo: { periods: number[], volumes: number[], envEnabled: boolean[] }[] = [
-      { periods: [], volumes: [], envEnabled: [] },
-      { periods: [], volumes: [], envEnabled: [] },
-      { periods: [], volumes: [], envEnabled: [] },
-    ];
-
-    for (let i = 0; i < Math.min(ymFile.header.frameCount, 100); i++) {
-      const frame = ymFile.frames[i];
-      for (let ch = 0; ch < 3; ch++) {
-        const period = frame[ch * 2] | ((frame[ch * 2 + 1] & 0x0f) << 8);
-        const vol = frame[8 + ch] & 0x0f;
-        const envEnabled = (frame[8 + ch] & 0x10) !== 0;
-        if (period > 0) channelInfo[ch].periods.push(period);
-        channelInfo[ch].volumes.push(vol);
-        channelInfo[ch].envEnabled.push(envEnabled);
-      }
-    }
-
-    for (let ch = 0; ch < 3; ch++) {
-      const periods = channelInfo[ch].periods;
-      const envCount = channelInfo[ch].envEnabled.filter(e => e).length;
-      if (periods.length > 0) {
-        const avgPeriod = periods.reduce((a, b) => a + b, 0) / periods.length;
-        const minPeriod = Math.min(...periods);
-        const maxPeriod = Math.max(...periods);
-        const uniquePeriods = new Set(periods).size;
-        console.log(`Channel ${ch}: periods ${minPeriod}-${maxPeriod} (avg ${avgPeriod.toFixed(0)}), ` +
-          `${uniquePeriods} unique values, env enabled ${envCount}/${periods.length} frames`);
-      }
-    }
-
-    // Check for dual-channel patterns (similar periods on multiple channels)
-    const frame50 = ymFile.frames[Math.min(50, ymFile.header.frameCount - 1)];
-    const frame50Periods = [
-      frame50[0] | ((frame50[1] & 0x0f) << 8),
-      frame50[2] | ((frame50[3] & 0x0f) << 8),
-      frame50[4] | ((frame50[5] & 0x0f) << 8),
-    ];
-    console.log('Frame 50 periods:', frame50Periods);
-    console.log('============================================');
   }
 
   /**
@@ -194,6 +116,18 @@ export class YmReplayer {
       this.intervalId = null;
     }
 
+    // Stop all effects
+    for (let ch = 0; ch < 3; ch++) {
+      this.ym.stopSid(ch);
+      this.ym.stopDrum(ch);
+    }
+    this.ym.stopSyncBuzzer();
+
+    // Silence all channels
+    this.ym.setChannelVolume(0, 0);
+    this.ym.setChannelVolume(1, 0);
+    this.ym.setChannelVolume(2, 0);
+
     this.state = 'paused';
     this.callbacks.onStateChange?.('paused');
   }
@@ -212,14 +146,17 @@ export class YmReplayer {
     this.callbacks.onStateChange?.('stopped');
     this.notifyFrameChange();
 
-    // Reset envelope
-    this.envelope.reset();
+    // Stop all effects
+    for (let ch = 0; ch < 3; ch++) {
+      this.ym.stopSid(ch);
+      this.ym.stopDrum(ch);
+    }
+    this.ym.stopSyncBuzzer();
 
     // Silence all channels
     this.ym.setChannelVolume(0, 0);
     this.ym.setChannelVolume(1, 0);
     this.ym.setChannelVolume(2, 0);
-    this.ym.setNoiseEnabled(false);
 
     await this.ym.stop();
   }
@@ -230,8 +167,6 @@ export class YmReplayer {
   seek(frame: number): void {
     if (!this.ymFile) return;
     this.currentFrame = Math.max(0, Math.min(frame, this.ymFile.header.frameCount - 1));
-    // Reset envelope on seek since we don't know the envelope state at arbitrary frames
-    this.envelope.reset();
     this.notifyFrameChange();
   }
 
@@ -281,9 +216,6 @@ export class YmReplayer {
     const frame = this.ymFile.frames[this.currentFrame];
     this.applyFrame(frame);
 
-    // Advance envelope by one frame's worth of internal clock ticks
-    this.envelope.tick(this.ticksPerFrame);
-
     this.currentFrame++;
 
     // Handle looping
@@ -314,107 +246,102 @@ export class YmReplayer {
     const noisePeriod = frame[6] & 0x1f;
     this.ym.setNoisePeriod(noisePeriod || 1);
 
-    // R7: Mixer control (inverted logic: 0 = enabled)
-    const mixer = frame[7];
-    const toneA = (mixer & 0x01) === 0;
-    const toneB = (mixer & 0x02) === 0;
-    const toneC = (mixer & 0x04) === 0;
-    const noiseA = (mixer & 0x08) === 0;
-    const noiseB = (mixer & 0x10) === 0;
-    const noiseC = (mixer & 0x20) === 0;
+    // R7: Mixer control - send the full register to worklet
+    this.ym.setMixer(frame[7]);
 
-    this.ym.setChannelTone(0, toneA);
-    this.ym.setChannelTone(1, toneB);
-    this.ym.setChannelTone(2, toneC);
-
-    // Enable noise if any channel has noise enabled
-    this.ym.setNoiseEnabled(noiseA || noiseB || noiseC);
+    // R8-R10: Channel volumes with envelope enable bit
+    this.ym.setChannelVolumeReg(0, frame[8]);
+    this.ym.setChannelVolumeReg(1, frame[9]);
+    this.ym.setChannelVolumeReg(2, frame[10]);
 
     // R11-R12: Envelope period (16-bit)
     const envPeriod = frame[11] | (frame[12] << 8);
-    this.envelope.setPeriod(envPeriod);
+    this.ym.setEnvelopePeriod(envPeriod || 1);
 
     // R13: Envelope shape (writing triggers restart on real hardware)
     // In YM files, 0xFF typically means "don't write to R13" (no trigger)
-    // Any other value triggers envelope restart
-    const envShapeRaw = frame[13];
-    if (envShapeRaw !== 0xff) {
-      const envShape = envShapeRaw & 0x0f;
-      // Always trigger restart when R13 is written (not 0xFF)
-      // This is how real hardware works - any write to R13 restarts envelope
-      this.envelope.setShape(envShape);
-      this.currentEnvShape = envShape;
+    if (frame[13] !== 0xff) {
+      this.ym.setEnvelopeShape(frame[13] & 0x0f);
     }
 
-    // Track envelope period changes
-    if (envPeriod !== this.currentEnvPeriod) {
-      this.currentEnvPeriod = envPeriod;
+    // Decode and apply special effects
+    this.applyEffects(frame);
+  }
+
+  /**
+   * Decode and apply YM special effects from register frame
+   */
+  private applyEffects(frame: Uint8Array): void {
+    if (!this.ymFile) return;
+
+    // YM2/YM3 formats don't have special effects
+    const format = this.ymFile.header.format;
+    if (format === 'YM2' || format === 'YM3' || format === 'YM3b') {
+      return;
     }
 
-    // Calculate envelope frequency for LFO
-    // Envelope cycles through 64 steps (sustain loop), so freq = internalClock / (period * 64)
-    const envFrequency = this.currentEnvPeriod > 0
-      ? this.internalClock / (this.currentEnvPeriod * 64)
-      : 0;
+    // Decode effects based on format (YM5 or YM6)
+    const effects: Effect[] =
+      format === 'YM6' ? [...decodeEffectsYm6(frame)] : decodeEffectsYm5(frame);
 
-    // Map envelope shape to Web Audio waveform
-    // Shapes 2, 6: sawtooth (continuous ramp)
-    // Shapes 4, 8, 10, 14: triangle (continuous alternating)
-    // Other shapes decay/attack and hold - use triangle as approximation
-    const isLoopingShape = [2, 4, 6, 8, 10, 14].includes(this.currentEnvShape);
-    const waveform: OscillatorType = [2, 6].includes(this.currentEnvShape) ? 'sawtooth' : 'triangle';
+    // Track which effects are active this frame
+    const sidActiveThisFrame: [boolean, boolean, boolean] = [false, false, false];
+    const drumActiveThisFrame: [boolean, boolean, boolean] = [false, false, false];
+    let syncBuzzerActiveThisFrame = false;
 
-    // R8-R10: Channel volumes (4-bit, bit 4 = envelope mode)
-    const volA = frame[8] & 0x0f;
-    const volB = frame[9] & 0x0f;
-    const volC = frame[10] & 0x0f;
+    for (const effect of effects) {
+      switch (effect.type) {
+        case 'sid':
+        case 'sinusSid':
+          if (effect.voice !== undefined && effect.freq && effect.volume !== undefined) {
+            this.ym.startSid(effect.voice, effect.freq, effect.volume, effect.type === 'sinusSid');
+            sidActiveThisFrame[effect.voice] = true;
+          }
+          break;
 
-    const useEnvA = (frame[8] & 0x10) !== 0;
-    const useEnvB = (frame[9] & 0x10) !== 0;
-    const useEnvC = (frame[10] & 0x10) !== 0;
+        case 'digidrum':
+          if (
+            effect.voice !== undefined &&
+            effect.drumNum !== undefined &&
+            effect.freq &&
+            this.ymFile.digidrums.length > 0
+          ) {
+            this.ym.startDrum(effect.voice, effect.drumNum, effect.freq);
+            drumActiveThisFrame[effect.voice] = true;
+          }
+          break;
 
-    // Apply volumes - use LFO-based envelope for audio-rate modulation
-    // This allows envelope frequencies above frame rate (50Hz)
-    if (useEnvA && isLoopingShape && envFrequency > 0) {
-      this.ym.setChannelEnvelopeLfo(0, envFrequency, waveform);
-      this.ym.setChannelEnvelopeEnabled(0, true);
-    } else if (useEnvA) {
-      // Non-looping shape or zero period - use frame-rate envelope
-      this.ym.setChannelEnvelopeEnabled(0, false);
-      this.ym.setChannelVolumeRaw(0, this.envelope.getVolume());
-    } else {
-      this.ym.setChannelEnvelopeEnabled(0, false);
-      this.ym.setChannelVolume(0, volA);
+        case 'syncBuzzer':
+          if (effect.freq) {
+            this.ym.startSyncBuzzer(effect.freq);
+            syncBuzzerActiveThisFrame = true;
+          }
+          break;
+      }
     }
 
-    if (useEnvB && isLoopingShape && envFrequency > 0) {
-      this.ym.setChannelEnvelopeLfo(1, envFrequency, waveform);
-      this.ym.setChannelEnvelopeEnabled(1, true);
-    } else if (useEnvB) {
-      this.ym.setChannelEnvelopeEnabled(1, false);
-      this.ym.setChannelVolumeRaw(1, this.envelope.getVolume());
-    } else {
-      this.ym.setChannelEnvelopeEnabled(1, false);
-      this.ym.setChannelVolume(1, volB);
+    // Stop effects that were active but are no longer
+    for (let ch = 0; ch < 3; ch++) {
+      if (this.activeSid[ch] && !sidActiveThisFrame[ch]) {
+        this.ym.stopSid(ch);
+      }
+      if (this.activeDrum[ch] && !drumActiveThisFrame[ch]) {
+        // Don't stop drum mid-playback - let it finish naturally
+        // this.ym.stopDrum(ch);
+      }
     }
 
-    if (useEnvC && isLoopingShape && envFrequency > 0) {
-      this.ym.setChannelEnvelopeLfo(2, envFrequency, waveform);
-      this.ym.setChannelEnvelopeEnabled(2, true);
-    } else if (useEnvC) {
-      this.ym.setChannelEnvelopeEnabled(2, false);
-      this.ym.setChannelVolumeRaw(2, this.envelope.getVolume());
-    } else {
-      this.ym.setChannelEnvelopeEnabled(2, false);
-      this.ym.setChannelVolume(2, volC);
+    if (this.activeSyncBuzzer && !syncBuzzerActiveThisFrame) {
+      this.ym.stopSyncBuzzer();
     }
+
+    // Update tracking state
+    this.activeSid = sidActiveThisFrame;
+    this.activeSyncBuzzer = syncBuzzerActiveThisFrame;
   }
 
   private notifyFrameChange(): void {
-    this.callbacks.onFrameChange?.(
-      this.currentFrame,
-      this.ymFile?.header.frameCount ?? 0
-    );
+    this.callbacks.onFrameChange?.(this.currentFrame, this.ymFile?.header.frameCount ?? 0);
   }
 
   /**

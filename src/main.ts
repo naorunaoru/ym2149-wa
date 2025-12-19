@@ -7,12 +7,25 @@ import { parseYmFile, formatDuration, getYmDuration, YmFile } from './ym-parser'
 
 const replayer = new YmReplayer();
 let currentYmFile: YmFile | null = null;
+let currentTrackIndex = -1;
+let isPlaying = false;
 
 function $(id: string): HTMLElement {
   return document.getElementById(id)!;
 }
 
-async function loadYmFile(filename: string): Promise<void> {
+function getPlaylistItems(): NodeListOf<HTMLElement> {
+  return document.querySelectorAll('.playlist-item');
+}
+
+async function loadTrack(index: number): Promise<void> {
+  const items = getPlaylistItems();
+  if (index < 0 || index >= items.length) return;
+
+  const item = items[index];
+  const filename = item.dataset.file;
+  if (!filename) return;
+
   const status = $('status');
   status.textContent = 'Loading ' + filename + '...';
 
@@ -26,62 +39,127 @@ async function loadYmFile(filename: string): Promise<void> {
     const data = new Uint8Array(buffer);
 
     currentYmFile = parseYmFile(data);
-    replayer.load(currentYmFile);
+    currentTrackIndex = index;
+    await replayer.load(currentYmFile);
 
-    // Update UI
-    $('songInfo').style.display = 'block';
-    $('songTitle').textContent = currentYmFile.metadata.songName || filename;
-    $('songAuthor').textContent = currentYmFile.metadata.author || 'Unknown';
+    // Update now playing section
+    const title = currentYmFile.metadata.songName || filename.replace('.ym', '');
+    const author = currentYmFile.metadata.author || '';
+    $('songTitle').textContent = title;
+    $('songAuthor').textContent = author;
+    $('songMeta').style.display = 'flex';
     $('songFormat').textContent = currentYmFile.header.format;
     $('songFrames').textContent = currentYmFile.header.frameCount.toString();
     $('totalTime').textContent = formatDuration(getYmDuration(currentYmFile));
 
+    // Update playlist item with metadata
+    const trackNameEl = item.querySelector('.track-name');
+    const trackArtistEl = item.querySelector('.track-artist');
+    if (trackNameEl) trackNameEl.textContent = title;
+    if (trackArtistEl) trackArtistEl.textContent = author || '-';
+
+    // Update format badge
+    const formatEl = item.querySelector('.track-format');
+    if (formatEl) formatEl.textContent = currentYmFile.header.format;
+
     // Enable transport buttons
     ($('playBtn') as HTMLButtonElement).disabled = false;
     ($('stopBtn') as HTMLButtonElement).disabled = false;
+    ($('prevBtn') as HTMLButtonElement).disabled = index === 0;
+    ($('nextBtn') as HTMLButtonElement).disabled = index === items.length - 1;
 
-    // Update song button states
-    document.querySelectorAll('.song-btn').forEach(btn => {
-      btn.classList.toggle('active', (btn as HTMLElement).dataset.file === filename);
+    // Update playlist item states
+    items.forEach((el, i) => {
+      el.classList.toggle('active', i === index);
+      if (i !== index) el.classList.remove('playing');
     });
 
-    status.textContent = 'Loaded: ' + (currentYmFile.metadata.songName || filename);
+    status.textContent = '';
   } catch (err) {
     status.textContent = 'Error loading file: ' + (err as Error).message;
     console.error(err);
   }
 }
 
+function updatePlayIcon(): void {
+  const playIcon = $('playIcon');
+  if (isPlaying) {
+    // Pause icon
+    playIcon.innerHTML = '<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>';
+  } else {
+    // Play icon
+    playIcon.innerHTML = '<path d="M8 5v14l11-7z"/>';
+  }
+}
+
+function setPlayingState(playing: boolean): void {
+  isPlaying = playing;
+  updatePlayIcon();
+
+  // Update playlist item playing state
+  const items = getPlaylistItems();
+  items.forEach((el, i) => {
+    el.classList.toggle('playing', playing && i === currentTrackIndex);
+  });
+}
+
 function setupPlayer(): void {
   const playBtn = $('playBtn') as HTMLButtonElement;
-  const pauseBtn = $('pauseBtn') as HTMLButtonElement;
   const stopBtn = $('stopBtn') as HTMLButtonElement;
+  const prevBtn = $('prevBtn') as HTMLButtonElement;
+  const nextBtn = $('nextBtn') as HTMLButtonElement;
   const progressBar = $('progressBar');
   const progressFill = $('progressFill');
   const currentTimeEl = $('currentTime');
+  const volumeSlider = $('volumeSlider') as HTMLInputElement;
+  const volumeValue = $('volumeValue');
 
-  // Song selection buttons
-  document.querySelectorAll('.song-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const filename = (btn as HTMLElement).dataset.file;
-      if (filename) {
-        loadYmFile(filename);
-      }
+  // Playlist item selection - clicking always starts playback
+  getPlaylistItems().forEach((item, index) => {
+    item.addEventListener('click', async () => {
+      await loadTrack(index);
+      await replayer.play();
     });
   });
 
   // Transport controls
   playBtn.addEventListener('click', async () => {
-    await replayer.play();
-  });
-
-  pauseBtn.addEventListener('click', () => {
-    replayer.pause();
+    if (isPlaying) {
+      replayer.pause();
+    } else {
+      await replayer.play();
+    }
   });
 
   stopBtn.addEventListener('click', async () => {
     await replayer.stop();
   });
+
+  prevBtn.addEventListener('click', async () => {
+    if (currentTrackIndex > 0) {
+      const wasPlaying = isPlaying;
+      await loadTrack(currentTrackIndex - 1);
+      if (wasPlaying) await replayer.play();
+    }
+  });
+
+  nextBtn.addEventListener('click', async () => {
+    const items = getPlaylistItems();
+    if (currentTrackIndex < items.length - 1) {
+      const wasPlaying = isPlaying;
+      await loadTrack(currentTrackIndex + 1);
+      if (wasPlaying) await replayer.play();
+    }
+  });
+
+  // Volume control
+  const updateVolume = () => {
+    const value = parseInt(volumeSlider.value, 10);
+    volumeValue.textContent = value + '%';
+    // Convert 0-100 to 0-1 range
+    replayer.setMasterVolume(value / 100);
+  };
+  volumeSlider.addEventListener('input', updateVolume);
 
   // Progress bar click to seek
   progressBar.addEventListener('click', (e) => {
@@ -95,13 +173,15 @@ function setupPlayer(): void {
   // Replayer callbacks
   replayer.setCallbacks({
     onStateChange: (state) => {
-      playBtn.disabled = state === 'playing' || !currentYmFile;
-      pauseBtn.disabled = state !== 'playing';
+      const playing = state === 'playing';
+      setPlayingState(playing);
+
+      playBtn.disabled = !currentYmFile;
       stopBtn.disabled = !currentYmFile;
 
       if (state === 'stopped') {
         progressFill.style.width = '0%';
-        currentTimeEl.textContent = '00:00';
+        currentTimeEl.textContent = '0:00';
       }
     },
     onFrameChange: (frame, total) => {
@@ -115,6 +195,9 @@ function setupPlayer(): void {
       $('status').textContent = 'Playback error: ' + error.message;
     }
   });
+
+  // Initial volume display
+  updateVolume();
 }
 
 document.addEventListener('DOMContentLoaded', () => {

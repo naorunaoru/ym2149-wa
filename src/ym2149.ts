@@ -1,11 +1,9 @@
 /**
- * YM2149 PSG emulation using Web Audio API
- * 
- * This implementation prioritizes using native Web Audio nodes where possible,
- * trading some accuracy for simplicity and performance.
+ * YM2149 PSG emulation using AudioWorklet
+ *
+ * This implementation uses an AudioWorklet processor for cycle-accurate
+ * sample-level mixing with proper AND gate logic like real hardware.
  */
-
-import { VOLUME_TABLE, periodToFrequency } from './tables';
 
 export interface ChannelState {
   toneEnabled: boolean;
@@ -23,301 +21,76 @@ export interface YM2149State {
 }
 
 /**
- * A single tone channel using OscillatorNode
- *
- * Supports hardware envelope modulation via a separate LFO oscillator
- * that modulates the gain at audio rate.
- */
-class ToneChannel {
-  private oscillator: OscillatorNode;
-  private gainNode: GainNode;
-  private envelopeGain: GainNode;  // Separate gain for envelope modulation
-  private envelopeLfo: OscillatorNode | null = null;
-  private envelopeLfoGain: GainNode;  // Controls LFO depth
-  private _enabled = true;
-  private _period = 284; // ~440Hz
-  private _volume = 15;
-  private _useEnvelope = false;
-
-  constructor(private ctx: AudioContext, destination: AudioNode) {
-    this.oscillator = new OscillatorNode(ctx, {
-      type: 'square',
-      frequency: periodToFrequency(this._period),
-    });
-
-    // Main volume gain (for non-envelope mode)
-    this.gainNode = new GainNode(ctx, {
-      gain: VOLUME_TABLE[this._volume],
-    });
-
-    // Envelope modulation gain (multiplied with main gain)
-    this.envelopeGain = new GainNode(ctx, { gain: 1 });
-
-    // LFO gain node (controls envelope depth, connected to envelopeGain.gain)
-    this.envelopeLfoGain = new GainNode(ctx, { gain: 0 });
-
-    // Signal chain: oscillator -> gainNode -> envelopeGain -> destination
-    this.oscillator.connect(this.gainNode);
-    this.gainNode.connect(this.envelopeGain);
-    this.envelopeGain.connect(destination);
-
-    // LFO modulates the envelope gain
-    this.envelopeLfoGain.connect(this.envelopeGain.gain);
-
-    this.oscillator.start();
-  }
-
-  set enabled(value: boolean) {
-    this._enabled = value;
-    this.updateGain();
-  }
-
-  get enabled(): boolean {
-    return this._enabled;
-  }
-
-  set period(value: number) {
-    this._period = Math.max(1, Math.min(4095, value));
-    const freq = periodToFrequency(this._period);
-    this.oscillator.frequency.setTargetAtTime(freq, this.ctx.currentTime, 0.001);
-  }
-
-  get period(): number {
-    return this._period;
-  }
-
-  set volume(value: number) {
-    this._volume = Math.max(0, Math.min(15, value));
-    this.updateGain();
-  }
-
-  get volume(): number {
-    return this._volume;
-  }
-
-  private updateGain(): void {
-    const targetGain = this._enabled ? VOLUME_TABLE[this._volume] : 0;
-    this.gainNode.gain.setTargetAtTime(targetGain, this.ctx.currentTime, 0.005);
-  }
-
-  /**
-   * Set volume directly as a 0-1 value (for envelope output)
-   * Used when envelope is updated at frame rate (fallback mode)
-   */
-  setVolumeRaw(value: number): void {
-    const targetGain = this._enabled ? Math.max(0, Math.min(1, value)) : 0;
-    this.gainNode.gain.setTargetAtTime(targetGain, this.ctx.currentTime, 0.005);
-  }
-
-  /**
-   * Enable/disable envelope LFO modulation for this channel
-   * When enabled, the envelope oscillator modulates the gain at audio rate
-   */
-  setEnvelopeEnabled(enabled: boolean): void {
-    this._useEnvelope = enabled;
-    if (enabled) {
-      // Set base gain to max, let envelope modulate
-      this.gainNode.gain.setTargetAtTime(1.0, this.ctx.currentTime, 0.005);
-      // Envelope gain will be controlled by LFO
-      this.envelopeGain.gain.setTargetAtTime(0.5, this.ctx.currentTime, 0.001);
-      this.envelopeLfoGain.gain.setTargetAtTime(0.5, this.ctx.currentTime, 0.001);
-    } else {
-      // Disable LFO modulation
-      this.envelopeLfoGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.001);
-      this.envelopeGain.gain.setTargetAtTime(1, this.ctx.currentTime, 0.001);
-      this.updateGain();
-    }
-  }
-
-  /**
-   * Configure the envelope LFO oscillator
-   * @param frequency - envelope cycle frequency in Hz
-   * @param waveform - 'sawtooth' for shapes 2,6 (ramp), 'triangle' for shapes 4,8,10,14
-   */
-  setEnvelopeLfo(frequency: number, waveform: OscillatorType): void {
-    // Stop existing LFO if any
-    if (this.envelopeLfo) {
-      this.envelopeLfo.stop();
-      this.envelopeLfo.disconnect();
-    }
-
-    // Create new LFO at the envelope frequency
-    this.envelopeLfo = new OscillatorNode(this.ctx, {
-      type: waveform,
-      frequency: frequency,
-    });
-
-    this.envelopeLfo.connect(this.envelopeLfoGain);
-    this.envelopeLfo.start();
-  }
-
-  disconnect(): void {
-    this.oscillator.stop();
-    this.oscillator.disconnect();
-    this.gainNode.disconnect();
-    this.envelopeGain.disconnect();
-    this.envelopeLfoGain.disconnect();
-    if (this.envelopeLfo) {
-      this.envelopeLfo.stop();
-      this.envelopeLfo.disconnect();
-    }
-  }
-}
-
-/**
- * Noise generator using a looped buffer of white noise
- * 
- * Note: This doesn't replicate the exact 17-bit LFSR behavior,
- * but provides a similar sonic character.
- */
-class NoiseGenerator {
-  private bufferSource: AudioBufferSourceNode | null = null;
-  private noiseBuffer: AudioBuffer;
-  private gainNode: GainNode;
-  private filterNode: BiquadFilterNode;
-  private _enabled = false;
-  private _period = 16;
-  private _volume = 15;
-
-  constructor(private ctx: AudioContext, destination: AudioNode) {
-    // Create noise buffer (1 second of white noise)
-    const bufferSize = ctx.sampleRate;
-    this.noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-    const data = this.noiseBuffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) {
-      data[i] = Math.random() * 2 - 1;
-    }
-
-    // Low-pass filter to simulate noise period (higher period = lower cutoff)
-    this.filterNode = new BiquadFilterNode(ctx, {
-      type: 'lowpass',
-      frequency: this.periodToFilterFreq(this._period),
-      Q: 1,
-    });
-
-    this.gainNode = new GainNode(ctx, { gain: 0 });
-    
-    this.filterNode.connect(this.gainNode);
-    this.gainNode.connect(destination);
-    
-    this.startNoiseSource();
-  }
-
-  private startNoiseSource(): void {
-    if (this.bufferSource) {
-      this.bufferSource.stop();
-      this.bufferSource.disconnect();
-    }
-    
-    this.bufferSource = new AudioBufferSourceNode(this.ctx, {
-      buffer: this.noiseBuffer,
-      loop: true,
-    });
-    this.bufferSource.connect(this.filterNode);
-    this.bufferSource.start();
-  }
-
-  private periodToFilterFreq(period: number): number {
-    // Map period 1-31 to filter frequency
-    // Lower period = higher frequency noise
-    // This is an approximation of how the LFSR clock affects noise timbre
-    const maxFreq = 20000;
-    const minFreq = 200;
-    const normalized = (31 - period) / 30;
-    return minFreq + normalized * (maxFreq - minFreq);
-  }
-
-  set enabled(value: boolean) {
-    this._enabled = value;
-    this.updateGain();
-  }
-
-  get enabled(): boolean {
-    return this._enabled;
-  }
-
-  set period(value: number) {
-    this._period = Math.max(1, Math.min(31, value));
-    this.filterNode.frequency.setTargetAtTime(
-      this.periodToFilterFreq(this._period),
-      this.ctx.currentTime,
-      0.01
-    );
-  }
-
-  get period(): number {
-    return this._period;
-  }
-
-  set volume(value: number) {
-    this._volume = Math.max(0, Math.min(15, value));
-    this.updateGain();
-  }
-
-  get volume(): number {
-    return this._volume;
-  }
-
-  private updateGain(): void {
-    const targetGain = this._enabled ? VOLUME_TABLE[this._volume] * 0.5 : 0;
-    this.gainNode.gain.setTargetAtTime(targetGain, this.ctx.currentTime, 0.005);
-  }
-
-  disconnect(): void {
-    if (this.bufferSource) {
-      this.bufferSource.stop();
-      this.bufferSource.disconnect();
-    }
-    this.filterNode.disconnect();
-    this.gainNode.disconnect();
-  }
-}
-
-/**
- * Main YM2149 emulator class
+ * Main YM2149 emulator class using AudioWorklet
  */
 export class YM2149 {
   private ctx: AudioContext;
+  private workletNode: AudioWorkletNode | null = null;
   private masterGain: GainNode;
-  private dcFilter: BiquadFilterNode;
-  private channels: [ToneChannel, ToneChannel, ToneChannel];
-  private noise: NoiseGenerator;
+  private workletReady = false;
+  private pendingMessages: Array<Record<string, unknown>> = [];
 
   constructor() {
     this.ctx = new AudioContext();
-    
-    // DC offset removal filter
-    this.dcFilter = new BiquadFilterNode(this.ctx, {
-      type: 'highpass',
-      frequency: 20,
-      Q: 0.7,
-    });
-    
-    // Master volume (divide by 3 for 3 channels + noise headroom)
-    this.masterGain = new GainNode(this.ctx, { gain: 0.25 });
-    
-    this.dcFilter.connect(this.masterGain);
+
+    // Master volume
+    this.masterGain = new GainNode(this.ctx, { gain: 0.5 });
     this.masterGain.connect(this.ctx.destination);
-    
-    // Create 3 tone channels
-    this.channels = [
-      new ToneChannel(this.ctx, this.dcFilter),
-      new ToneChannel(this.ctx, this.dcFilter),
-      new ToneChannel(this.ctx, this.dcFilter),
-    ];
-    
-    // Create noise generator
-    this.noise = new NoiseGenerator(this.ctx, this.dcFilter);
   }
 
   get audioContext(): AudioContext {
     return this.ctx;
   }
 
+  /**
+   * Set master volume (0.0 to 1.0)
+   */
+  setMasterVolume(volume: number): void {
+    this.masterGain.gain.value = Math.max(0, Math.min(1, volume));
+  }
+
+  /**
+   * Initialize the AudioWorklet processor
+   */
+  private async initWorklet(): Promise<void> {
+    if (this.workletReady) return;
+
+    // Load worklet from separate file (Vite handles the URL correctly)
+    const workletUrl = new URL('./ym2149-processor.js', import.meta.url);
+    await this.ctx.audioWorklet.addModule(workletUrl);
+
+    this.workletNode = new AudioWorkletNode(this.ctx, 'ym2149-processor', {
+      numberOfInputs: 0,
+      numberOfOutputs: 1,
+      outputChannelCount: [1],
+    });
+
+    this.workletNode.connect(this.masterGain);
+    this.workletReady = true;
+
+    // Send any pending messages
+    for (const msg of this.pendingMessages) {
+      this.workletNode.port.postMessage(msg);
+    }
+    this.pendingMessages = [];
+  }
+
+  /**
+   * Send a message to the worklet processor
+   */
+  private postMessage(msg: Record<string, unknown>): void {
+    if (this.workletNode && this.workletReady) {
+      this.workletNode.port.postMessage(msg);
+    } else {
+      this.pendingMessages.push(msg);
+    }
+  }
+
   async start(): Promise<void> {
     if (this.ctx.state === 'suspended') {
       await this.ctx.resume();
     }
+    await this.initWorklet();
   }
 
   async stop(): Promise<void> {
@@ -326,109 +99,239 @@ export class YM2149 {
     }
   }
 
+  /**
+   * Set the internal clock rate (master clock / 8)
+   * Typically 250kHz for a 2MHz master clock
+   */
+  setInternalClock(clock: number): void {
+    this.postMessage({ type: 'setInternalClock', value: clock });
+  }
+
+  /**
+   * Reset all generators to initial state
+   * Call this when loading a new song to prevent audio artifacts
+   */
+  reset(): void {
+    this.postMessage({ type: 'reset' });
+  }
+
   // Channel A (index 0)
   setChannelATone(enabled: boolean): void {
-    this.channels[0].enabled = enabled;
+    this.setChannelTone(0, enabled);
   }
 
   setChannelAPeriod(period: number): void {
-    this.channels[0].period = period;
+    this.setChannelPeriod(0, period);
   }
 
   setChannelAVolume(volume: number): void {
-    this.channels[0].volume = volume;
-    // Also update noise volume if noise is routed through channel A
-    this.noise.volume = volume;
+    this.setChannelVolume(0, volume);
   }
 
   // Channel B (index 1)
   setChannelBTone(enabled: boolean): void {
-    this.channels[1].enabled = enabled;
+    this.setChannelTone(1, enabled);
   }
 
   setChannelBPeriod(period: number): void {
-    this.channels[1].period = period;
+    this.setChannelPeriod(1, period);
   }
 
   setChannelBVolume(volume: number): void {
-    this.channels[1].volume = volume;
+    this.setChannelVolume(1, volume);
   }
 
   // Channel C (index 2)
   setChannelCTone(enabled: boolean): void {
-    this.channels[2].enabled = enabled;
+    this.setChannelTone(2, enabled);
   }
 
   setChannelCPeriod(period: number): void {
-    this.channels[2].period = period;
+    this.setChannelPeriod(2, period);
   }
 
   setChannelCVolume(volume: number): void {
-    this.channels[2].volume = volume;
+    this.setChannelVolume(2, volume);
   }
 
   // Noise
-  setNoiseEnabled(enabled: boolean): void {
-    this.noise.enabled = enabled;
+  setNoiseEnabled(_enabled: boolean): void {
+    // Noise enable is now controlled per-channel via mixer register
+    // This method is kept for API compatibility but does nothing
   }
 
   setNoisePeriod(period: number): void {
-    this.noise.period = period;
+    this.postMessage({ type: 'setNoisePeriod', value: period });
   }
 
   // Generic channel access
-  setChannelTone(channel: number, enabled: boolean): void {
-    if (channel >= 0 && channel < 3) {
-      this.channels[channel].enabled = enabled;
-    }
+  setChannelTone(_channel: number, _enabled: boolean): void {
+    // Tone enable is controlled via mixer register
+    // This method is kept for API compatibility but does nothing directly
+    // The replayer should call setMixer instead
   }
 
   setChannelPeriod(channel: number, period: number): void {
     if (channel >= 0 && channel < 3) {
-      this.channels[channel].period = period;
+      this.postMessage({ type: 'setTonePeriod', channel, value: period });
     }
   }
 
   setChannelVolume(channel: number, volume: number): void {
     if (channel >= 0 && channel < 3) {
-      this.channels[channel].volume = volume;
+      // Volume 0-15, bit 4 = 0 means fixed volume
+      this.postMessage({ type: 'setVolume', channel, value: volume & 0x0f });
     }
   }
 
   /**
-   * Set channel volume as raw 0-1 value (for envelope output)
+   * Set channel volume with envelope enable flag
+   * @param channel - channel index (0-2)
+   * @param volume - volume register value (bits 0-3 = volume, bit 4 = envelope enable)
+   */
+  setChannelVolumeReg(channel: number, volume: number): void {
+    if (channel >= 0 && channel < 3) {
+      this.postMessage({ type: 'setVolume', channel, value: volume });
+    }
+  }
+
+  /**
+   * Set volume directly as a 0-1 value (for legacy envelope output)
+   * Note: With AudioWorklet, envelope is handled internally, so this maps to fixed volume
    */
   setChannelVolumeRaw(channel: number, volume: number): void {
     if (channel >= 0 && channel < 3) {
-      this.channels[channel].setVolumeRaw(volume);
+      // Convert 0-1 to 0-15 and set as fixed volume
+      const level = Math.round(volume * 15);
+      this.postMessage({ type: 'setVolume', channel, value: level & 0x0f });
     }
   }
 
   /**
-   * Enable/disable envelope LFO for a channel
+   * Set mixer register (R7)
+   * Bits 0-2: Tone disable for channels A, B, C (0 = enabled)
+   * Bits 3-5: Noise disable for channels A, B, C (0 = enabled)
    */
-  setChannelEnvelopeEnabled(channel: number, enabled: boolean): void {
+  setMixer(value: number): void {
+    this.postMessage({ type: 'setMixer', value });
+  }
+
+  /**
+   * Set envelope period (R11-R12)
+   */
+  setEnvelopePeriod(period: number): void {
+    this.postMessage({ type: 'setEnvelopePeriod', value: period });
+  }
+
+  /**
+   * Set envelope shape (R13)
+   * Writing to this register also triggers envelope restart
+   */
+  setEnvelopeShape(shape: number): void {
+    this.postMessage({ type: 'setEnvelopeShape', value: shape });
+  }
+
+  /**
+   * Legacy: Enable/disable envelope LFO for a channel
+   * With AudioWorklet, envelope is handled internally
+   */
+  setChannelEnvelopeEnabled(_channel: number, _enabled: boolean): void {
+    // No-op - envelope is handled by the worklet
+  }
+
+  /**
+   * Legacy: Configure envelope LFO for a channel
+   * With AudioWorklet, envelope is handled internally
+   */
+  setChannelEnvelopeLfo(_channel: number, _frequency: number, _waveform: OscillatorType): void {
+    // No-op - envelope is handled by the worklet
+  }
+
+  // ========================================
+  // DigiDrum Support
+  // ========================================
+
+  /**
+   * Load DigiDrum samples into the worklet
+   * @param samples - Array of Uint8Array sample data (8-bit unsigned)
+   */
+  loadDrumSamples(samples: Uint8Array[]): void {
+    // Convert Uint8Array to regular arrays for postMessage
+    const samplesData = samples.map((s) => Array.from(s));
+    this.postMessage({ type: 'loadDrumSamples', samples: samplesData });
+  }
+
+  /**
+   * Start playing a DigiDrum sample on a channel
+   * @param channel - Channel index (0-2)
+   * @param drumNum - Sample index
+   * @param freq - Playback frequency in Hz
+   */
+  startDrum(channel: number, drumNum: number, freq: number): void {
     if (channel >= 0 && channel < 3) {
-      this.channels[channel].setEnvelopeEnabled(enabled);
+      this.postMessage({ type: 'startDrum', channel, drumNum, freq });
     }
   }
 
   /**
-   * Configure envelope LFO for a channel
-   * @param channel - channel index (0-2)
-   * @param frequency - envelope frequency in Hz
-   * @param waveform - oscillator waveform type
+   * Stop DigiDrum playback on a channel
    */
-  setChannelEnvelopeLfo(channel: number, frequency: number, waveform: OscillatorType): void {
+  stopDrum(channel: number): void {
     if (channel >= 0 && channel < 3) {
-      this.channels[channel].setEnvelopeLfo(frequency, waveform);
+      this.postMessage({ type: 'stopDrum', channel });
     }
+  }
+
+  // ========================================
+  // SID Voice Effect Support
+  // ========================================
+
+  /**
+   * Start SID voice effect (amplitude gating) on a channel
+   * @param channel - Channel index (0-2)
+   * @param freq - Gating frequency in Hz
+   * @param volume - Maximum volume (0-15)
+   * @param isSinus - Use sinusoidal modulation instead of square wave
+   */
+  startSid(channel: number, freq: number, volume: number, isSinus = false): void {
+    if (channel >= 0 && channel < 3) {
+      this.postMessage({ type: 'startSid', channel, freq, volume, isSinus });
+    }
+  }
+
+  /**
+   * Stop SID voice effect on a channel
+   */
+  stopSid(channel: number): void {
+    if (channel >= 0 && channel < 3) {
+      this.postMessage({ type: 'stopSid', channel });
+    }
+  }
+
+  // ========================================
+  // Sync Buzzer Effect Support
+  // ========================================
+
+  /**
+   * Start Sync Buzzer effect (timer-controlled envelope retriggering)
+   * @param freq - Retriggering frequency in Hz
+   */
+  startSyncBuzzer(freq: number): void {
+    this.postMessage({ type: 'startSyncBuzzer', freq });
+  }
+
+  /**
+   * Stop Sync Buzzer effect
+   */
+  stopSyncBuzzer(): void {
+    this.postMessage({ type: 'stopSyncBuzzer' });
   }
 
   dispose(): void {
-    this.channels.forEach(ch => ch.disconnect());
-    this.noise.disconnect();
-    this.dcFilter.disconnect();
+    if (this.workletNode) {
+      this.workletNode.disconnect();
+      this.workletNode = null;
+    }
     this.masterGain.disconnect();
     this.ctx.close();
   }
