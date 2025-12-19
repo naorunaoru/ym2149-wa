@@ -30,6 +30,10 @@ export class YM2149 {
   private workletReady = false;
   private pendingMessages: Array<Record<string, unknown>> = [];
 
+  // SharedArrayBuffer for real-time channel levels (visualization)
+  private levelsBuffer: SharedArrayBuffer | null = null;
+  private levelsView: Float32Array | null = null;
+
   constructor() {
     this.ctx = new AudioContext();
 
@@ -67,6 +71,14 @@ export class YM2149 {
 
     this.workletNode.connect(this.masterGain);
     this.workletReady = true;
+
+    // Initialize SharedArrayBuffer for real-time channel levels
+    // 3 floats (12 bytes) for channels A, B, C
+    if (typeof SharedArrayBuffer !== 'undefined') {
+      this.levelsBuffer = new SharedArrayBuffer(3 * Float32Array.BYTES_PER_ELEMENT);
+      this.levelsView = new Float32Array(this.levelsBuffer);
+      this.workletNode.port.postMessage({ type: 'setLevelsBuffer', buffer: this.levelsBuffer });
+    }
 
     // Send any pending messages
     for (const msg of this.pendingMessages) {
@@ -325,6 +337,23 @@ export class YM2149 {
    */
   stopSyncBuzzer(): void {
     this.postMessage({ type: 'stopSyncBuzzer' });
+  }
+
+  // ========================================
+  // Real-time Visualization Support
+  // ========================================
+
+  /**
+   * Get current channel output levels for visualization.
+   * Returns [channelA, channelB, channelC] with values 0-1.
+   * Updates in real-time via SharedArrayBuffer.
+   * Returns [0, 0, 0] if SharedArrayBuffer is not available.
+   */
+  getChannelLevels(): [number, number, number] {
+    if (this.levelsView) {
+      return [this.levelsView[0], this.levelsView[1], this.levelsView[2]];
+    }
+    return [0, 0, 0];
   }
 
   dispose(): void {

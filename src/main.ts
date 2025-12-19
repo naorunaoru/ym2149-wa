@@ -9,6 +9,7 @@ const replayer = new YmReplayer();
 let currentYmFile: YmFile | null = null;
 let currentTrackIndex = -1;
 let isPlaying = false;
+let visualizationAnimationId: number | null = null;
 
 function $(id: string): HTMLElement {
   return document.getElementById(id)!;
@@ -100,6 +101,50 @@ function setPlayingState(playing: boolean): void {
   const items = getPlaylistItems();
   items.forEach((el, i) => {
     el.classList.toggle('playing', playing && i === currentTrackIndex);
+  });
+
+  // Start/stop visualization loop
+  if (playing) {
+    startVisualization();
+  } else {
+    stopVisualization();
+  }
+}
+
+function startVisualization(): void {
+  if (visualizationAnimationId !== null) return;
+
+  function updateBars() {
+    const [a, b, c] = replayer.getChannelLevels();
+
+    // Find the currently playing item's bars
+    const playingItem = document.querySelector('.playlist-item.playing');
+    if (playingItem) {
+      const bars = playingItem.querySelectorAll('.playing-indicator span');
+      if (bars.length === 3) {
+        // Scale levels for better visual effect (levels are 0-1)
+        (bars[0] as HTMLElement).style.transform = `scaleY(${0.2 + a * 0.8})`;
+        (bars[1] as HTMLElement).style.transform = `scaleY(${0.2 + b * 0.8})`;
+        (bars[2] as HTMLElement).style.transform = `scaleY(${0.2 + c * 0.8})`;
+      }
+    }
+
+    visualizationAnimationId = requestAnimationFrame(updateBars);
+  }
+
+  updateBars();
+}
+
+function stopVisualization(): void {
+  if (visualizationAnimationId !== null) {
+    cancelAnimationFrame(visualizationAnimationId);
+    visualizationAnimationId = null;
+  }
+
+  // Reset bar transforms
+  const bars = document.querySelectorAll('.playing-indicator span');
+  bars.forEach((bar) => {
+    (bar as HTMLElement).style.transform = '';
   });
 }
 

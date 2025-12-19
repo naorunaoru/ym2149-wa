@@ -316,16 +316,12 @@
     }
     .playing-indicator span {
       width: 3px;
+      height: 100%;
       background: #00d4ff;
       border-radius: 1px;
-      animation: soundbar 0.5s ease-in-out infinite alternate;
-    }
-    .playing-indicator span:nth-child(1) { height: 60%; animation-delay: 0s; }
-    .playing-indicator span:nth-child(2) { height: 100%; animation-delay: 0.1s; }
-    .playing-indicator span:nth-child(3) { height: 40%; animation-delay: 0.2s; }
-    @keyframes soundbar {
-      0% { transform: scaleY(0.3); }
-      100% { transform: scaleY(1); }
+      transform-origin: bottom;
+      transform: scaleY(0.2);
+      transition: transform 0.05s ease-out;
     }
 
     /* Footer */

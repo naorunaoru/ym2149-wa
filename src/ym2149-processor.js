@@ -322,6 +322,9 @@ class YM2149Processor extends AudioWorkletProcessor {
     this.syncBuzzerPhase = 0;
     this.syncBuzzerStep = 0;
 
+    // SharedArrayBuffer for real-time channel levels (visualization)
+    this.channelLevels = null; // Float32Array view into SharedArrayBuffer
+
     // Message handling
     this.port.onmessage = (e) => this.handleMessage(e.data);
   }
@@ -424,6 +427,12 @@ class YM2149Processor extends AudioWorkletProcessor {
         this.syncBuzzerPhase = 0;
         this.syncBuzzerStep = 0;
         break;
+
+      // SharedArrayBuffer for real-time visualization
+      case 'setLevelsBuffer':
+        // msg.buffer is a SharedArrayBuffer (3 floats = 12 bytes)
+        this.channelLevels = new Float32Array(msg.buffer);
+        break;
     }
   }
 
@@ -432,6 +441,9 @@ class YM2149Processor extends AudioWorkletProcessor {
     const channel = output[0];
 
     if (!channel) return true;
+
+    // Track peak levels per channel for visualization
+    let peakLevels = [0, 0, 0];
 
     for (let i = 0; i < channel.length; i++) {
       // === Handle Sync Buzzer (envelope retriggering) ===
@@ -479,30 +491,45 @@ class YM2149Processor extends AudioWorkletProcessor {
       let mixedOutput = 0;
 
       for (let ch = 0; ch < 3; ch++) {
+        let channelOutput = 0;
+
         // Check for DigiDrum override
         const drumSample = this.drums[ch].getSample();
         if (drumSample !== null) {
           // DigiDrum bypasses normal mixing
-          mixedOutput += drumSample;
+          channelOutput = drumSample;
           this.drums[ch].advance();
-          continue;
+        } else {
+          // Gate = (tone | !toneEnabled) & (noise | !noiseEnabled)
+          // Uses OR-accumulated values over all ticks in this sample period
+          const toneGate = toneAccum[ch] || !this.toneEnabled[ch];
+          const noiseGate = noiseAccum || !this.noiseEnabled[ch];
+          const gate = toneGate && noiseGate;
+
+          if (gate) {
+            // Get volume level (either fixed or from envelope)
+            const level = this.useEnvelope[ch] ? envLevel : this.volumes[ch] << 1;
+            channelOutput = VOLUME_TABLE[level];
+          }
         }
 
-        // Gate = (tone | !toneEnabled) & (noise | !noiseEnabled)
-        // Uses OR-accumulated values over all ticks in this sample period
-        const toneGate = toneAccum[ch] || !this.toneEnabled[ch];
-        const noiseGate = noiseAccum || !this.noiseEnabled[ch];
-        const gate = toneGate && noiseGate;
+        mixedOutput += channelOutput;
 
-        if (gate) {
-          // Get volume level (either fixed or from envelope)
-          const level = this.useEnvelope[ch] ? envLevel : this.volumes[ch] << 1;
-          mixedOutput += VOLUME_TABLE[level];
+        // Track peak level for this channel
+        if (channelOutput > peakLevels[ch]) {
+          peakLevels[ch] = channelOutput;
         }
       }
 
       // Normalize (3 channels max)
       channel[i] = mixedOutput / 3;
+    }
+
+    // Write peak levels to SharedArrayBuffer for visualization
+    if (this.channelLevels) {
+      this.channelLevels[0] = peakLevels[0];
+      this.channelLevels[1] = peakLevels[1];
+      this.channelLevels[2] = peakLevels[2];
     }
 
     return true;

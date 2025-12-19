@@ -208,6 +208,14 @@ export class YmReplayer {
   }
 
   /**
+   * Get current channel output levels for visualization.
+   * Returns [channelA, channelB, channelC] with values 0-1.
+   */
+  getChannelLevels(): [number, number, number] {
+    return this.ym.getChannelLevels();
+  }
+
+  /**
    * Process one frame
    */
   private tick(): void {
