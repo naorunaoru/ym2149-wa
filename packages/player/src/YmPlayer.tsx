@@ -1,5 +1,12 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { YmReplayer, parseYmFile, YmFile } from '@ym2149/core';
+import {
+  YmReplayer,
+  parseYmFile,
+  YmFile,
+  Pt3Replayer,
+  parsePt3File,
+  Pt3File,
+} from '@ym2149/core';
 import { Track, YmPlayerProps, TrackMetadata, TrackDisplay } from './types';
 import { NowPlaying } from './components/NowPlaying/NowPlaying';
 import { ProgressBar } from './components/ProgressBar/ProgressBar';
@@ -7,6 +14,27 @@ import { TransportControls } from './components/TransportControls/TransportContr
 import { VolumeControl } from './components/VolumeControl/VolumeControl';
 import { Playlist } from './components/Playlist/Playlist';
 import styles from './YmPlayer.module.css';
+
+/** Common interface for both replayers */
+interface Replayer {
+  play(): Promise<void>;
+  pause(): void;
+  stop(): Promise<void>;
+  seekTime(seconds: number): void;
+  setMasterVolume(volume: number): void;
+  getChannelLevels(): [number, number, number];
+  dispose(): void;
+  setCallbacks(callbacks: {
+    onStateChange?: (state: 'stopped' | 'playing' | 'paused') => void;
+    onFrameChange?: (frame: number, total: number) => void;
+    onError?: (error: Error) => void;
+  }): void;
+}
+
+/** Detect file type from filename */
+function isPt3File(filename: string): boolean {
+  return filename.toLowerCase().endsWith('.pt3');
+}
 
 export function YmPlayer({
   tracks,
@@ -17,8 +45,12 @@ export function YmPlayer({
   onError,
   className,
 }: YmPlayerProps) {
-  const replayerRef = useRef<YmReplayer | null>(null);
+  const ymReplayerRef = useRef<YmReplayer | null>(null);
+  const pt3ReplayerRef = useRef<Pt3Replayer | null>(null);
+  const activeReplayerRef = useRef<Replayer | null>(null);
   const ymFileRef = useRef<YmFile | null>(null);
+  const pt3FileRef = useRef<Pt3File | null>(null);
+  const volumeRef = useRef(initialVolume);
 
   const [currentTrackIndex, setCurrentTrackIndex] = useState(-1);
   const [currentTrack, setCurrentTrack] = useState<TrackMetadata | null>(null);
@@ -31,35 +63,44 @@ export function YmPlayer({
     tracks.map((t) => ({
       displayName: t.displayName,
       displayArtist: t.artist,
-      format: 'YM',
-    }))
+      format: isPt3File(t.filename) ? 'PT3' : 'YM',
+    })),
   );
 
   const playingIndex = isPlaying ? currentTrackIndex : -1;
 
-  // Initialize replayer
+  // Shared callbacks for both replayers
+  const replayerCallbacks = {
+    onStateChange: (state: 'stopped' | 'playing' | 'paused') => {
+      setIsPlaying(state === 'playing');
+    },
+    onFrameChange: (frame: number, total: number) => {
+      setCurrentFrame(frame);
+      setTotalFrames(total);
+    },
+    onError: (error: Error) => {
+      setStatus(`Playback error: ${error.message}`);
+      onError?.(error);
+    },
+  };
+
+  // Initialize both replayers
   useEffect(() => {
-    const replayer = new YmReplayer();
-    replayerRef.current = replayer;
+    const ymReplayer = new YmReplayer();
+    const pt3Replayer = new Pt3Replayer();
 
-    replayer.setCallbacks({
-      onStateChange: (state) => {
-        setIsPlaying(state === 'playing');
-      },
-      onFrameChange: (frame, total) => {
-        setCurrentFrame(frame);
-        setTotalFrames(total);
-      },
-      onError: (error) => {
-        setStatus(`Playback error: ${error.message}`);
-        onError?.(error);
-      },
-    });
+    ymReplayerRef.current = ymReplayer;
+    pt3ReplayerRef.current = pt3Replayer;
 
-    replayer.setMasterVolume(initialVolume / 100);
+    ymReplayer.setCallbacks(replayerCallbacks);
+    pt3Replayer.setCallbacks(replayerCallbacks);
+
+    ymReplayer.setMasterVolume(initialVolume / 100);
+    pt3Replayer.setMasterVolume(initialVolume / 100);
 
     return () => {
-      replayer.dispose();
+      ymReplayer.dispose();
+      pt3Replayer.dispose();
     };
   }, []);
 
@@ -69,20 +110,26 @@ export function YmPlayer({
       tracks.map((t) => ({
         displayName: t.displayName,
         displayArtist: t.artist,
-        format: 'YM',
-      }))
+        format: isPt3File(t.filename) ? 'PT3' : 'YM',
+      })),
     );
   }, [tracks]);
 
   const loadTrack = useCallback(
     async (index: number) => {
-      const replayer = replayerRef.current;
-      if (!replayer || index < 0 || index >= tracks.length) return;
+      if (index < 0 || index >= tracks.length) return;
 
       const track = tracks[index];
+      const isPt3 = isPt3File(track.filename);
+
       setStatus(`Loading ${track.filename}...`);
 
       try {
+        // Stop current replayer if any
+        if (activeReplayerRef.current) {
+          await activeReplayerRef.current.stop();
+        }
+
         const url = basePath
           ? `${basePath}${track.filename}`
           : `${import.meta.env.BASE_URL}${track.filename}`;
@@ -93,29 +140,66 @@ export function YmPlayer({
 
         const buffer = await response.arrayBuffer();
         const data = new Uint8Array(buffer);
-        const ymFile = parseYmFile(data);
-        ymFileRef.current = ymFile;
 
-        await replayer.load(ymFile);
+        if (isPt3) {
+          // Load PT3 file
+          const pt3File = parsePt3File(data);
+          pt3FileRef.current = pt3File;
+          ymFileRef.current = null;
 
-        setCurrentTrackIndex(index);
-        setCurrentTrack({
-          name: ymFile.metadata.songName || track.displayName,
-          author: ymFile.metadata.author || '',
-          format: ymFile.header.format,
-          frameCount: ymFile.header.frameCount,
-          frameRate: ymFile.header.frameRate,
-        });
+          const replayer = pt3ReplayerRef.current!;
+          await replayer.load(pt3File);
+          replayer.setMasterVolume(volumeRef.current / 100);
+          activeReplayerRef.current = replayer;
 
-        setTrackDisplays((prev) => {
-          const updated = [...prev];
-          updated[index] = {
-            displayName: ymFile.metadata.songName || track.displayName,
-            displayArtist: ymFile.metadata.author || '-',
+          setCurrentTrackIndex(index);
+          setCurrentTrack({
+            name: pt3File.title || track.displayName,
+            author: pt3File.author || '',
+            format: 'PT3',
+            frameCount: replayer.getFrameCount(),
+            frameRate: 50,
+          });
+
+          setTrackDisplays((prev) => {
+            const updated = [...prev];
+            updated[index] = {
+              displayName: pt3File.title || track.displayName,
+              displayArtist: pt3File.author || '-',
+              format: 'PT3',
+            };
+            return updated;
+          });
+        } else {
+          // Load YM file
+          const ymFile = parseYmFile(data);
+          ymFileRef.current = ymFile;
+          pt3FileRef.current = null;
+
+          const replayer = ymReplayerRef.current!;
+          await replayer.load(ymFile);
+          replayer.setMasterVolume(volumeRef.current / 100);
+          activeReplayerRef.current = replayer;
+
+          setCurrentTrackIndex(index);
+          setCurrentTrack({
+            name: ymFile.metadata.songName || track.displayName,
+            author: ymFile.metadata.author || '',
             format: ymFile.header.format,
-          };
-          return updated;
-        });
+            frameCount: ymFile.header.frameCount,
+            frameRate: ymFile.header.frameRate,
+          });
+
+          setTrackDisplays((prev) => {
+            const updated = [...prev];
+            updated[index] = {
+              displayName: ymFile.metadata.songName || track.displayName,
+              displayArtist: ymFile.metadata.author || '-',
+              format: ymFile.header.format,
+            };
+            return updated;
+          });
+        }
 
         setStatus('');
         onTrackChange?.(index);
@@ -126,14 +210,14 @@ export function YmPlayer({
         console.error(err);
       }
     },
-    [tracks, basePath, onTrackChange, onError]
+    [tracks, basePath, onTrackChange, onError],
   );
 
   // Auto-play first track
   useEffect(() => {
     if (autoPlay && tracks.length > 0 && currentTrackIndex === -1) {
       loadTrack(0).then(() => {
-        replayerRef.current?.play();
+        activeReplayerRef.current?.play();
       });
     }
   }, [autoPlay, tracks.length, currentTrackIndex, loadTrack]);
@@ -141,28 +225,28 @@ export function YmPlayer({
   const handleTrackSelect = useCallback(
     async (index: number) => {
       await loadTrack(index);
-      await replayerRef.current?.play();
+      await activeReplayerRef.current?.play();
     },
-    [loadTrack]
+    [loadTrack],
   );
 
   const handlePlay = useCallback(async () => {
     if (isPlaying) {
-      replayerRef.current?.pause();
+      activeReplayerRef.current?.pause();
     } else {
-      await replayerRef.current?.play();
+      await activeReplayerRef.current?.play();
     }
   }, [isPlaying]);
 
   const handleStop = useCallback(async () => {
-    await replayerRef.current?.stop();
+    await activeReplayerRef.current?.stop();
   }, []);
 
   const handlePrev = useCallback(async () => {
     if (currentTrackIndex > 0) {
       const wasPlaying = isPlaying;
       await loadTrack(currentTrackIndex - 1);
-      if (wasPlaying) await replayerRef.current?.play();
+      if (wasPlaying) await activeReplayerRef.current?.play();
     }
   }, [currentTrackIndex, isPlaying, loadTrack]);
 
@@ -170,21 +254,22 @@ export function YmPlayer({
     if (currentTrackIndex < tracks.length - 1) {
       const wasPlaying = isPlaying;
       await loadTrack(currentTrackIndex + 1);
-      if (wasPlaying) await replayerRef.current?.play();
+      if (wasPlaying) await activeReplayerRef.current?.play();
     }
   }, [currentTrackIndex, isPlaying, tracks.length, loadTrack]);
 
   const handleSeek = useCallback((time: number) => {
-    replayerRef.current?.seekTime(time);
+    activeReplayerRef.current?.seekTime(time);
   }, []);
 
   const handleVolumeChange = useCallback((newVolume: number) => {
     setVolume(newVolume);
-    replayerRef.current?.setMasterVolume(newVolume / 100);
+    volumeRef.current = newVolume;
+    activeReplayerRef.current?.setMasterVolume(newVolume / 100);
   }, []);
 
   const getLevels = useCallback((): [number, number, number] => {
-    return replayerRef.current?.getChannelLevels() ?? [0, 0, 0];
+    return activeReplayerRef.current?.getChannelLevels() ?? [0, 0, 0];
   }, []);
 
   const frameRate = currentTrack?.frameRate ?? 50;

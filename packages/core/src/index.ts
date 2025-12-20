@@ -56,6 +56,9 @@ export { EnvelopeGenerator } from './envelope';
 /** Parse YM file from raw bytes (auto-detects format) */
 export { parseYmFile, getYmDuration, formatDuration } from './parser';
 
+/** Parse PT3 file from raw bytes */
+export { parsePt3File, isPt3File, Pt3Player, Pt3Replayer } from './pt3';
+
 // ============================================
 // Effects
 // ============================================
@@ -101,3 +104,19 @@ export type {
   EffectType,
   Effect,
 } from './types';
+
+/** PT3 type definitions */
+export type {
+  ToneTableId,
+  Pt3Version,
+  Pt3File,
+  Pt3Sample,
+  Pt3SampleFrame,
+  Pt3Ornament,
+  Pt3Pattern,
+  Pt3ChannelState,
+  Pt3PlayerState,
+  AyRegisters,
+  Pt3ReplayerState,
+  Pt3ReplayerCallbacks,
+} from './pt3';
