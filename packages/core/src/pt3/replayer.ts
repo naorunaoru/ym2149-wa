@@ -42,7 +42,7 @@ export class Pt3Replayer {
     this.ym = new YM2149();
   }
 
-  get audioContext(): AudioContext {
+  get audioContext(): AudioContext | null {
     return this.ym.audioContext;
   }
 

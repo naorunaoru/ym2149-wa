@@ -24,25 +24,30 @@ export interface YM2149State {
  * Main YM2149 emulator class using AudioWorklet
  */
 export class YM2149 {
-  private ctx: AudioContext;
+  private ctx: AudioContext | null = null;
   private workletNode: AudioWorkletNode | null = null;
-  private masterGain: GainNode;
+  private masterGain: GainNode | null = null;
   private workletReady = false;
   private pendingMessages: Array<Record<string, unknown>> = [];
+  private initialVolume = 0.5;
 
   // SharedArrayBuffer for real-time channel levels (visualization)
   private levelsBuffer: SharedArrayBuffer | null = null;
   private levelsView: Float32Array | null = null;
 
-  constructor() {
-    this.ctx = new AudioContext();
+  /**
+   * Initialize AudioContext on first user interaction.
+   * iOS Safari requires AudioContext to be created in response to a user gesture.
+   */
+  private initAudioContext(): void {
+    if (this.ctx) return;
 
-    // Master volume
-    this.masterGain = new GainNode(this.ctx, { gain: 0.5 });
+    this.ctx = new AudioContext();
+    this.masterGain = new GainNode(this.ctx, { gain: this.initialVolume });
     this.masterGain.connect(this.ctx.destination);
   }
 
-  get audioContext(): AudioContext {
+  get audioContext(): AudioContext | null {
     return this.ctx;
   }
 
@@ -50,14 +55,19 @@ export class YM2149 {
    * Set master volume (0.0 to 1.0)
    */
   setMasterVolume(volume: number): void {
-    this.masterGain.gain.value = Math.max(0, Math.min(1, volume));
+    const clamped = Math.max(0, Math.min(1, volume));
+    this.initialVolume = clamped;
+    if (this.masterGain) {
+      this.masterGain.gain.value = clamped;
+    }
   }
 
   /**
    * Initialize the AudioWorklet processor
+   * Must be called after initAudioContext()
    */
   private async initWorklet(): Promise<void> {
-    if (this.workletReady) return;
+    if (this.workletReady || !this.ctx || !this.masterGain) return;
 
     // Load worklet from separate file (Vite handles the URL correctly)
     const workletUrl = new URL('./processor.js', import.meta.url);
@@ -99,15 +109,30 @@ export class YM2149 {
   }
 
   async start(): Promise<void> {
-    if (this.ctx.state === 'suspended') {
-      await this.ctx.resume();
+    this.initAudioContext();
+    if (this.ctx!.state === 'suspended') {
+      await this.ctx!.resume();
     }
     await this.initWorklet();
   }
 
   async stop(): Promise<void> {
-    if (this.ctx.state === 'running') {
-      await this.ctx.suspend();
+    if (this.workletNode) {
+      this.workletNode.disconnect();
+      this.workletNode = null;
+    }
+    this.workletReady = false;
+    this.levelsBuffer = null;
+    this.levelsView = null;
+
+    if (this.masterGain) {
+      this.masterGain.disconnect();
+      this.masterGain = null;
+    }
+
+    if (this.ctx) {
+      await this.ctx.close();
+      this.ctx = null;
     }
   }
 
@@ -361,7 +386,7 @@ export class YM2149 {
       this.workletNode.disconnect();
       this.workletNode = null;
     }
-    this.masterGain.disconnect();
-    this.ctx.close();
+    this.masterGain?.disconnect();
+    this.ctx?.close();
   }
 }
