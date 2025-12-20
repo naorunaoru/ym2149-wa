@@ -60,6 +60,11 @@ export const tracks: Track[] = [
     "artist": "siril.4d.perm.ru. o6.o3.2oo1.bac"
   },
   {
+    "filename": "myaykrai.pt3",
+    "displayName": "kraimaiay",
+    "artist": "n1k-o2673"
+  },
+  {
     "filename": "NoPower.pt3",
     "displayName": "No power",
     "artist": "karbofos [Drink lover's] 2oo5"
