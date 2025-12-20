@@ -13,10 +13,10 @@ export type {
   Pt3Pattern,
   Pt3ChannelState,
   Pt3PlayerState,
-  AyRegisters,
 } from './types';
 
-export { createChannelState, createPlayerState, createAyRegisters } from './types';
+// Re-export register types from ym2149
+export type { AyRegisters, Ym2149Registers } from '../ym2149';
 
 // Tables
 export type { ToneTable } from './tables';
@@ -38,7 +38,12 @@ export {
 export { parsePt3File, isPt3File } from './parser';
 
 // Player
-export { Pt3Player } from './player';
+export {
+  Pt3Player,
+  createChannelState,
+  createPlayerState,
+  createAyRegisters,
+} from './player';
 
 // Replayer
 export { Pt3Replayer } from './replayer';

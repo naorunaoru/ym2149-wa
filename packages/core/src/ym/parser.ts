@@ -13,7 +13,7 @@ const ATTR_DRUM_4BIT = 0x04;
 const DEFAULT_MASTER_CLOCK = 2000000; // 2MHz Atari ST
 const DEFAULT_FRAME_RATE = 50; // 50Hz PAL
 
-export type YmFormat = 'YM2' | 'YM3' | 'YM3b' | 'YM5' | 'YM6';
+export type YmFormat = "YM2" | "YM3" | "YM3b" | "YM5" | "YM6";
 
 export interface YmHeader {
   format: YmFormat;
@@ -43,7 +43,9 @@ export interface YmFile {
  * Logarithmic lookup table for 4-bit DigiDrum expansion (matches ST-Sound reference)
  * Maps 4-bit values (0-15) to 8-bit amplitude values with logarithmic curve
  */
-const DIGIDRUM_4BIT_TABLE = [0, 1, 2, 2, 4, 6, 9, 12, 17, 24, 35, 48, 72, 103, 165, 255];
+const DIGIDRUM_4BIT_TABLE = [
+  0, 1, 2, 2, 4, 6, 9, 12, 17, 24, 35, 48, 72, 103, 165, 255,
+];
 
 /**
  * Decode 4-bit digidrum samples to 8-bit using logarithmic lookup table
@@ -66,26 +68,30 @@ export function parseYmFile(data: Uint8Array): YmFile {
   const magic = String.fromCharCode(data[0], data[1], data[2], data[3]);
 
   // Dispatch to appropriate parser based on format
-  if (magic === 'YM2!' || magic === 'YM3!') {
-    return parseYm2Ym3(data, magic === 'YM2!' ? 'YM2' : 'YM3');
+  if (magic === "YM2!" || magic === "YM3!") {
+    return parseYm2Ym3(data, magic === "YM2!" ? "YM2" : "YM3");
   }
 
   // Check for YM3b (different magic - 4 chars)
-  if (magic === 'YM3b') {
-    return parseYm2Ym3(data, 'YM3b');
+  if (magic === "YM3b") {
+    return parseYm2Ym3(data, "YM3b");
   }
 
-  if (magic !== 'YM5!' && magic !== 'YM6!') {
-    throw new Error('Invalid YM magic number: ' + magic + '. Expected YM2!, YM3!, YM3b, YM5! or YM6!');
+  if (magic !== "YM5!" && magic !== "YM6!") {
+    throw new Error(
+      "Invalid YM magic number: " +
+        magic +
+        ". Expected YM2!, YM3!, YM3b, YM5! or YM6!"
+    );
   }
 
-  return parseYm5Ym6(data, magic === 'YM6!' ? 'YM6' : 'YM5');
+  return parseYm5Ym6(data, magic === "YM6!" ? "YM6" : "YM5");
 }
 
 /**
  * Parse YM2/YM3/YM3b format (simple format with 14 registers per frame)
  */
-function parseYm2Ym3(data: Uint8Array, format: 'YM2' | 'YM3' | 'YM3b'): YmFile {
+function parseYm2Ym3(data: Uint8Array, format: "YM2" | "YM3" | "YM3b"): YmFile {
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
 
   // YM2/YM3 have minimal structure:
@@ -98,7 +104,7 @@ function parseYm2Ym3(data: Uint8Array, format: 'YM2' | 'YM3' | 'YM3b'): YmFile {
   let loopFrame = 0;
 
   // YM3b has loop frame at the end
-  if (format === 'YM3b') {
+  if (format === "YM3b") {
     dataSize -= 4;
     loopFrame = view.getUint32(data.length - 4, false); // big-endian
   }
@@ -107,10 +113,10 @@ function parseYm2Ym3(data: Uint8Array, format: 'YM2' | 'YM3' | 'YM3b'): YmFile {
   const frameCount = Math.floor(dataSize / 14);
 
   if (frameCount === 0) {
-    throw new Error('YM file has zero frames');
+    throw new Error("YM file has zero frames");
   }
   if (frameCount > 100000) {
-    throw new Error('YM frame count exceeds limit: ' + frameCount);
+    throw new Error("YM frame count exceeds limit: " + frameCount);
   }
 
   const header: YmHeader = {
@@ -138,8 +144,8 @@ function parseYm2Ym3(data: Uint8Array, format: 'YM2' | 'YM3' | 'YM3b'): YmFile {
   }
 
   const metadata: YmMetadata = {
-    songName: '',
-    author: '',
+    songName: "",
+    author: "",
     comment: `${format} format`,
   };
 
@@ -149,13 +155,13 @@ function parseYm2Ym3(data: Uint8Array, format: 'YM2' | 'YM3' | 'YM3b'): YmFile {
 /**
  * Parse YM5/YM6 format (full format with header, metadata, digidrums)
  */
-function parseYm5Ym6(data: Uint8Array, format: 'YM5' | 'YM6'): YmFile {
+function parseYm5Ym6(data: Uint8Array, format: "YM5" | "YM6"): YmFile {
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
 
   // Check signature "LeOnArD!"
   const signature = String.fromCharCode(...data.slice(4, 12));
-  if (signature !== 'LeOnArD!') {
-    throw new Error('Invalid YM signature: ' + signature);
+  if (signature !== "LeOnArD!") {
+    throw new Error("Invalid YM signature: " + signature);
   }
 
   // Parse header (big-endian)
@@ -172,10 +178,10 @@ function parseYm5Ym6(data: Uint8Array, format: 'YM5' | 'YM6'): YmFile {
 
   // Validate
   if (header.frameCount === 0) {
-    throw new Error('YM file has zero frames');
+    throw new Error("YM file has zero frames");
   }
   if (header.frameCount > 100000) {
-    throw new Error('YM frame count exceeds limit: ' + header.frameCount);
+    throw new Error("YM frame count exceeds limit: " + header.frameCount);
   }
 
   let offset = 34;
@@ -189,13 +195,13 @@ function parseYm5Ym6(data: Uint8Array, format: 'YM5' | 'YM6'): YmFile {
 
   for (let i = 0; i < header.digidrumCount; i++) {
     if (offset + 4 > data.length) {
-      throw new Error('Incomplete digidrum sample size field');
+      throw new Error("Incomplete digidrum sample size field");
     }
     const sampleSize = view.getUint32(offset, false);
     offset += 4;
 
     if (offset + sampleSize > data.length) {
-      throw new Error('Incomplete digidrum sample data');
+      throw new Error("Incomplete digidrum sample data");
     }
 
     const rawSample = data.slice(offset, offset + sampleSize);
@@ -211,7 +217,7 @@ function parseYm5Ym6(data: Uint8Array, format: 'YM5' | 'YM6'): YmFile {
 
   // Parse metadata (null-terminated strings)
   const parseNullString = (): string => {
-    let str = '';
+    let str = "";
     while (offset < data.length && data[offset] !== 0) {
       str += String.fromCharCode(data[offset]);
       offset++;
@@ -231,7 +237,7 @@ function parseYm5Ym6(data: Uint8Array, format: 'YM5' | 'YM6'): YmFile {
   const registerDataSize = header.frameCount * 16;
 
   if (offset + registerDataSize > data.length) {
-    throw new Error('Not enough data for register frames');
+    throw new Error("Not enough data for register frames");
   }
 
   const registerBytes = data.slice(offset, offset + registerDataSize);
@@ -261,28 +267,12 @@ function parseYm5Ym6(data: Uint8Array, format: 'YM5' | 'YM6'): YmFile {
       data[endMarkerOffset],
       data[endMarkerOffset + 1],
       data[endMarkerOffset + 2],
-      data[endMarkerOffset + 3],
+      data[endMarkerOffset + 3]
     );
-    if (endMarker !== 'End!') {
-      console.warn('YM end marker not found or invalid:', endMarker);
+    if (endMarker !== "End!") {
+      console.warn("YM end marker not found or invalid:", endMarker);
     }
   }
 
   return { header, metadata, frames, digidrums };
-}
-
-/**
- * Calculate duration in seconds
- */
-export function getYmDuration(file: YmFile): number {
-  return file.header.frameCount / file.header.frameRate;
-}
-
-/**
- * Format duration as MM:SS
- */
-export function formatDuration(seconds: number): string {
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return mins.toString().padStart(2, '0') + ':' + secs.toString().padStart(2, '0');
 }

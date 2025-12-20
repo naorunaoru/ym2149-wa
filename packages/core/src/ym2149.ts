@@ -21,6 +21,43 @@ export interface YM2149State {
 }
 
 /**
+ * YM2149 register values for one frame
+ * The YM2149 is the Yamaha variant of the AY-3-8910 sound chip
+ */
+export interface Ym2149Registers {
+  /** Channel A tone period (12-bit, R0-R1) */
+  toneA: number;
+  /** Channel B tone period (12-bit, R2-R3) */
+  toneB: number;
+  /** Channel C tone period (12-bit, R4-R5) */
+  toneC: number;
+  /** Noise period (5-bit, R6) */
+  noise: number;
+  /** Mixer control (R7) */
+  mixer: number;
+  /** Channel A amplitude (5-bit with envelope flag, R8) */
+  volumeA: number;
+  /** Channel B amplitude (5-bit with envelope flag, R9) */
+  volumeB: number;
+  /** Channel C amplitude (5-bit with envelope flag, R10) */
+  volumeC: number;
+  /** Envelope period (16-bit, R11-R12) */
+  envelopePeriod: number;
+  /** Envelope shape (4-bit, R13). 0xFF means don't write */
+  envelopeShape: number;
+  /** I/O Port A (R14) */
+  portA: number;
+  /** I/O Port B (R15) */
+  portB: number;
+}
+
+/**
+ * AY-3-8912 register values for one frame
+ * Subset of YM2149 registers excluding I/O ports
+ */
+export type AyRegisters = Omit<Ym2149Registers, 'portA' | 'portB'>;
+
+/**
  * Configuration options for YM2149 constructor
  */
 export interface YM2149Options {

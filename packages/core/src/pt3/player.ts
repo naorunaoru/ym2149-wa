@@ -5,14 +5,94 @@
  */
 
 import { getToneTable, getVolumeTable, ToneTable } from './tables';
-import {
-  Pt3File,
-  Pt3ChannelState,
-  Pt3PlayerState,
-  AyRegisters,
-  createPlayerState,
-  createAyRegisters,
-} from './types';
+import type { Pt3File, Pt3ChannelState, Pt3PlayerState, Pt3Version } from './types';
+import type { AyRegisters } from '../ym2149';
+
+/**
+ * Create initial channel state
+ */
+export function createChannelState(): Pt3ChannelState {
+  return {
+    addressInPattern: 0,
+    ornamentIndex: 0,
+    sampleIndex: 0,
+    tone: 0,
+    loopOrnamentPosition: 0,
+    ornamentLength: 0,
+    positionInOrnament: 0,
+    loopSamplePosition: 0,
+    sampleLength: 0,
+    positionInSample: 0,
+    volume: 15, // PT3 channels start at maximum volume
+    numberOfNotesToSkip: 0,
+    note: 0,
+    slideToNote: 0,
+    amplitude: 0,
+    envelopeEnabled: false,
+    enabled: false,
+    simpleGliss: false,
+    currentAmplitudeSliding: 0,
+    currentNoiseSliding: 0,
+    currentEnvelopeSliding: 0,
+    tonSlideCount: 0,
+    currentOnOff: 0,
+    onOffDelay: 0,
+    offOnDelay: 0,
+    tonSlideDelay: 0,
+    currentTonSliding: 0,
+    tonAccumulator: 0,
+    tonSlideStep: 0,
+    tonDelta: 0,
+    noteSkipCounter: 1,
+  };
+}
+
+/**
+ * Create initial player state
+ */
+export function createPlayerState(
+  version: Pt3Version,
+  delay: number
+): Pt3PlayerState {
+  return {
+    version,
+    envBaseLo: 0,
+    envBaseHi: 0,
+    curEnvSlide: 0,
+    envSlideAdd: 0,
+    curEnvDelay: 0,
+    envDelay: 0,
+    newEnvelopeShape: 0xff,
+    noiseBase: 0,
+    delay,
+    addToNoise: 0,
+    delayCounter: 1,
+    currentPosition: 0,
+    channels: [
+      createChannelState(),
+      createChannelState(),
+      createChannelState(),
+    ],
+  };
+}
+
+/**
+ * Create initial AY registers for PT3 playback
+ */
+export function createAyRegisters(): AyRegisters {
+  return {
+    toneA: 0,
+    toneB: 0,
+    toneC: 0,
+    noise: 0,
+    mixer: 0x3f, // All channels off by default
+    volumeA: 0,
+    volumeB: 0,
+    volumeC: 0,
+    envelopePeriod: 0,
+    envelopeShape: 0xff, // Don't write
+  };
+}
 
 /**
  * PT3 Player class - interprets PT3 patterns and generates AY register frames

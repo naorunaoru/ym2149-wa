@@ -3,15 +3,19 @@
  */
 
 // Types
-export type { YmFormat, YmHeader, YmMetadata, YmFile } from './parser';
+export type { YmFormat, YmHeader, YmMetadata, YmFile } from "./parser";
 
 // Parser
-export { parseYmFile, getYmDuration, formatDuration } from './parser';
+export { parseYmFile } from "./parser";
 
 // Effects
-export type { EffectType, Effect } from './effects';
-export { decodeEffectsYm5, decodeEffectsYm6 } from './effects';
+export type { EffectType, Effect } from "./effects";
+export { decodeEffectsYm5, decodeEffectsYm6 } from "./effects";
 
 // Replayer
-export type { ReplayerState, ReplayerCallbacks, YmReplayerOptions } from './replayer';
-export { YmReplayer } from './replayer';
+export type {
+  ReplayerState,
+  ReplayerCallbacks,
+  YmReplayerOptions,
+} from "./replayer";
+export { YmReplayer } from "./replayer";
