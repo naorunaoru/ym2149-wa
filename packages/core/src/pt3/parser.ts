@@ -215,17 +215,14 @@ function extractPatternChannel(data: Uint8Array, pointer: number): Uint8Array {
     return new Uint8Array([0]);
   }
 
-  // Scan for pattern rows (each row ends with a note or end-of-pattern marker)
-  // For now, copy a reasonable amount of data
-  // The player will interpret the actual structure
-  const maxLength = Math.min(256, data.length - pointer);
+  // PT3 patterns can have up to 64 rows, each row can have multiple commands
+  // plus effect parameters. 256 bytes was too small for some patterns.
+  // Use 2048 bytes which should be more than enough.
+  const maxLength = Math.min(2048, data.length - pointer);
   const channelData = new Uint8Array(maxLength);
 
   for (let i = 0; i < maxLength; i++) {
     channelData[i] = data[pointer + i];
-    // Check for pattern end (0x00 at the start of a new row after a note/command sequence)
-    // This is complex because 0x00 can appear as data within a row
-    // We'll let the player handle the actual row counting
   }
 
   return channelData;
