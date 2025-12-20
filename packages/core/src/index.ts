@@ -36,8 +36,11 @@
 // High-Level API
 // ============================================
 
+/** Abstract base class for replayers */
+export { BaseReplayer } from './base-replayer';
+
 /** High-level YM file replayer with playback controls */
-export { YmReplayer } from './replayer';
+export { YmReplayer } from './ym';
 
 // ============================================
 // Low-Level API
@@ -45,9 +48,6 @@ export { YmReplayer } from './replayer';
 
 /** Low-level YM2149 PSG chip emulator */
 export { YM2149 } from './ym2149';
-
-/** TurboSound dual-chip configuration */
-export { TurboSound } from './turbosound';
 
 /** Hardware envelope generator (internal use) */
 export { EnvelopeGenerator } from './envelope';
@@ -57,7 +57,7 @@ export { EnvelopeGenerator } from './envelope';
 // ============================================
 
 /** Parse YM file from raw bytes (auto-detects format) */
-export { parseYmFile, getYmDuration, formatDuration } from './parser';
+export { parseYmFile, getYmDuration, formatDuration } from './ym';
 
 /** Parse PT3 file from raw bytes */
 export { parsePt3File, isPt3File, Pt3Player, Pt3Replayer } from './pt3';
@@ -67,7 +67,7 @@ export { parsePt3File, isPt3File, Pt3Player, Pt3Replayer } from './pt3';
 // ============================================
 
 /** YM5/YM6 special effects decoders */
-export { decodeEffectsYm5, decodeEffectsYm6 } from './effects';
+export { decodeEffectsYm5, decodeEffectsYm6 } from './ym';
 
 // ============================================
 // Constants & Utilities
@@ -90,6 +90,13 @@ export {
 // Types
 // ============================================
 
+/** Base replayer type definitions */
+export type {
+  ReplayerState as BaseReplayerState,
+  BaseReplayerCallbacks,
+  BaseReplayerOptions,
+} from './base-replayer';
+
 /** All public type definitions */
 export type {
   // YM File types
@@ -101,8 +108,6 @@ export type {
   ChannelState,
   YM2149State,
   YM2149Options,
-  // TurboSound types
-  TurboSoundOptions,
   // Replayer types
   ReplayerState,
   ReplayerCallbacks,

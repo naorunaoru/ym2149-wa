@@ -23,6 +23,7 @@ export class Pt3Player {
   private toneTable: ToneTable;
   private volumeTable: readonly (readonly number[])[];
   private finished: boolean = false;
+  private loopCount: number = 0;
 
   constructor(file: Pt3File) {
     this.file = file;
@@ -48,7 +49,15 @@ export class Pt3Player {
   reset(): void {
     this.state = createPlayerState(this.file.version, this.file.delay);
     this.finished = false;
+    this.loopCount = 0;
     this.initPosition(0);
+  }
+
+  /**
+   * Get number of times the song has looped
+   */
+  getLoopCount(): number {
+    return this.loopCount;
   }
 
   /**
@@ -104,6 +113,7 @@ export class Pt3Player {
 
         if (this.state.currentPosition >= this.file.numberOfPositions) {
           this.state.currentPosition = this.file.loopPosition;
+          this.loopCount++;
         }
 
         this.initPosition(this.state.currentPosition);

@@ -162,60 +162,8 @@ export class YM2149 {
     this.postMessage({ type: 'reset' });
   }
 
-  // Channel A (index 0)
-  setChannelATone(enabled: boolean): void {
-    this.setChannelTone(0, enabled);
-  }
-
-  setChannelAPeriod(period: number): void {
-    this.setChannelPeriod(0, period);
-  }
-
-  setChannelAVolume(volume: number): void {
-    this.setChannelVolume(0, volume);
-  }
-
-  // Channel B (index 1)
-  setChannelBTone(enabled: boolean): void {
-    this.setChannelTone(1, enabled);
-  }
-
-  setChannelBPeriod(period: number): void {
-    this.setChannelPeriod(1, period);
-  }
-
-  setChannelBVolume(volume: number): void {
-    this.setChannelVolume(1, volume);
-  }
-
-  // Channel C (index 2)
-  setChannelCTone(enabled: boolean): void {
-    this.setChannelTone(2, enabled);
-  }
-
-  setChannelCPeriod(period: number): void {
-    this.setChannelPeriod(2, period);
-  }
-
-  setChannelCVolume(volume: number): void {
-    this.setChannelVolume(2, volume);
-  }
-
-  // Noise
-  setNoiseEnabled(_enabled: boolean): void {
-    // Noise enable is now controlled per-channel via mixer register
-    // This method is kept for API compatibility but does nothing
-  }
-
   setNoisePeriod(period: number): void {
     this.postMessage({ type: 'setNoisePeriod', value: period });
-  }
-
-  // Generic channel access
-  setChannelTone(_channel: number, _enabled: boolean): void {
-    // Tone enable is controlled via mixer register
-    // This method is kept for API compatibility but does nothing directly
-    // The replayer should call setMixer instead
   }
 
   setChannelPeriod(channel: number, period: number): void {
@@ -243,18 +191,6 @@ export class YM2149 {
   }
 
   /**
-   * Set volume directly as a 0-1 value (for legacy envelope output)
-   * Note: With AudioWorklet, envelope is handled internally, so this maps to fixed volume
-   */
-  setChannelVolumeRaw(channel: number, volume: number): void {
-    if (channel >= 0 && channel < 3) {
-      // Convert 0-1 to 0-15 and set as fixed volume
-      const level = Math.round(volume * 15);
-      this.postMessage({ type: 'setVolume', channel, value: level & 0x0f });
-    }
-  }
-
-  /**
    * Set mixer register (R7)
    * Bits 0-2: Tone disable for channels A, B, C (0 = enabled)
    * Bits 3-5: Noise disable for channels A, B, C (0 = enabled)
@@ -276,22 +212,6 @@ export class YM2149 {
    */
   setEnvelopeShape(shape: number): void {
     this.postMessage({ type: 'setEnvelopeShape', value: shape });
-  }
-
-  /**
-   * Legacy: Enable/disable envelope LFO for a channel
-   * With AudioWorklet, envelope is handled internally
-   */
-  setChannelEnvelopeEnabled(_channel: number, _enabled: boolean): void {
-    // No-op - envelope is handled by the worklet
-  }
-
-  /**
-   * Legacy: Configure envelope LFO for a channel
-   * With AudioWorklet, envelope is handled internally
-   */
-  setChannelEnvelopeLfo(_channel: number, _frequency: number, _waveform: OscillatorType): void {
-    // No-op - envelope is handled by the worklet
   }
 
   // ========================================
