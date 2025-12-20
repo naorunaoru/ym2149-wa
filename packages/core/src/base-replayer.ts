@@ -54,7 +54,7 @@ export abstract class BaseReplayer<
   protected file: TFile | null = null;
   protected currentFrame = 0;
   protected state: ReplayerState = 'stopped';
-  protected intervalId: number | null = null;
+  protected tickerWorker: Worker | null = null;
   protected callbacks: TCallbacks = {} as TCallbacks;
 
   constructor(options: BaseReplayerOptions) {
@@ -195,9 +195,10 @@ export abstract class BaseReplayer<
     // Calculate interval in ms from frame rate
     const intervalMs = 1000 / this.frameRate;
 
-    this.intervalId = window.setInterval(() => {
-      this.tick();
-    }, intervalMs);
+    // Use Web Worker for timing - not throttled in background tabs on Safari
+    this.tickerWorker = new Worker(new URL('./ticker-worker.ts', import.meta.url));
+    this.tickerWorker.onmessage = () => this.tick();
+    this.tickerWorker.postMessage(intervalMs);
   }
 
   /**
@@ -208,9 +209,10 @@ export abstract class BaseReplayer<
       return;
     }
 
-    if (this.intervalId !== null) {
-      clearInterval(this.intervalId);
-      this.intervalId = null;
+    if (this.tickerWorker) {
+      this.tickerWorker.postMessage('stop');
+      this.tickerWorker.terminate();
+      this.tickerWorker = null;
     }
 
     this.silenceChip();
@@ -223,9 +225,10 @@ export abstract class BaseReplayer<
    * Stop playback and reset to beginning
    */
   async stop(): Promise<void> {
-    if (this.intervalId !== null) {
-      clearInterval(this.intervalId);
-      this.intervalId = null;
+    if (this.tickerWorker) {
+      this.tickerWorker.postMessage('stop');
+      this.tickerWorker.terminate();
+      this.tickerWorker = null;
     }
 
     this.currentFrame = 0;
