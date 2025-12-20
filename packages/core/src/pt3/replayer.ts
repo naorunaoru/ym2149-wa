@@ -192,9 +192,14 @@ export class Pt3Replayer {
 
     await this.ym.start();
 
+    // Re-configure chip after start (worklet may have been recreated after stop)
+    const internalClock = ZX_SPECTRUM_CLOCK / 8;
+    this.ym.setInternalClock(internalClock);
+
     // Start second chip if TurboSound
     if (this.isTurboSound && this.ym2) {
       await this.ym2.start();
+      this.ym2.setInternalClock(internalClock);
     }
 
     if (this.state === 'playing') {

@@ -129,9 +129,6 @@ export function YmPlayer({
     async (index: number) => {
       if (index < 0 || index >= tracks.length) return;
 
-      // Initialize AudioContext on first user interaction
-      ensureAudioContext();
-
       const track = tracks[index];
       const isPt3 = isPt3File(track.filename);
 
@@ -223,7 +220,7 @@ export function YmPlayer({
         console.error(err);
       }
     },
-    [tracks, basePath, onTrackChange, onError, ensureAudioContext],
+    [tracks, basePath, onTrackChange, onError],
   );
 
   // Auto-play first track
@@ -236,40 +233,48 @@ export function YmPlayer({
   }, [autoPlay, tracks.length, currentTrackIndex, loadTrack]);
 
   const handleTrackSelect = useCallback(
-    async (index: number) => {
-      await loadTrack(index);
-      await activeReplayerRef.current?.play();
+    (index: number) => {
+      // Must be synchronous for iOS AudioContext policy
+      ensureAudioContext();
+      loadTrack(index).then(() => {
+        activeReplayerRef.current?.play();
+      });
     },
-    [loadTrack],
+    [loadTrack, ensureAudioContext],
   );
 
-  const handlePlay = useCallback(async () => {
+  const handlePlay = useCallback(() => {
     if (isPlaying) {
       activeReplayerRef.current?.pause();
     } else {
-      await activeReplayerRef.current?.play();
+      ensureAudioContext();
+      activeReplayerRef.current?.play();
     }
-  }, [isPlaying]);
+  }, [isPlaying, ensureAudioContext]);
 
-  const handleStop = useCallback(async () => {
-    await activeReplayerRef.current?.stop();
+  const handleStop = useCallback(() => {
+    activeReplayerRef.current?.stop();
   }, []);
 
-  const handlePrev = useCallback(async () => {
+  const handlePrev = useCallback(() => {
     if (currentTrackIndex > 0) {
+      ensureAudioContext();
       const wasPlaying = isPlaying;
-      await loadTrack(currentTrackIndex - 1);
-      if (wasPlaying) await activeReplayerRef.current?.play();
+      loadTrack(currentTrackIndex - 1).then(() => {
+        if (wasPlaying) activeReplayerRef.current?.play();
+      });
     }
-  }, [currentTrackIndex, isPlaying, loadTrack]);
+  }, [currentTrackIndex, isPlaying, loadTrack, ensureAudioContext]);
 
-  const handleNext = useCallback(async () => {
+  const handleNext = useCallback(() => {
     if (currentTrackIndex < tracks.length - 1) {
+      ensureAudioContext();
       const wasPlaying = isPlaying;
-      await loadTrack(currentTrackIndex + 1);
-      if (wasPlaying) await activeReplayerRef.current?.play();
+      loadTrack(currentTrackIndex + 1).then(() => {
+        if (wasPlaying) activeReplayerRef.current?.play();
+      });
     }
-  }, [currentTrackIndex, isPlaying, tracks.length, loadTrack]);
+  }, [currentTrackIndex, isPlaying, tracks.length, loadTrack, ensureAudioContext]);
 
   const handleSeek = useCallback((time: number) => {
     activeReplayerRef.current?.seekTime(time);

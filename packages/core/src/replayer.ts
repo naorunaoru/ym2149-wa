@@ -135,6 +135,20 @@ export class YmReplayer {
 
     await this.ym.start();
 
+    // Re-configure chip after start (worklet may have been recreated after stop)
+    const internalClock = this.ymFile.header.masterClock / 8;
+    this.ym.setInternalClock(internalClock);
+    if (this.ymFile.digidrums.length > 0) {
+      this.ym.loadDrumSamples(this.ymFile.digidrums);
+    }
+
+    // Reset effect tracking if coming from stopped state
+    if (this.state === 'stopped') {
+      this.activeSid = [false, false, false];
+      this.activeDrum = [false, false, false];
+      this.activeSyncBuzzer = false;
+    }
+
     if (this.state === 'playing') {
       return;
     }
