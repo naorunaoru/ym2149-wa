@@ -37,6 +37,11 @@ export interface Pt3File {
   patterns: Pt3Pattern[];
   /** Position list (pattern indices × 3 for transposition) */
   positionList: number[];
+
+  /** Whether this is a TurboSound file with a second module */
+  isTurboSound?: boolean;
+  /** Second module for TurboSound files */
+  secondModule?: Pt3File;
 }
 
 /**

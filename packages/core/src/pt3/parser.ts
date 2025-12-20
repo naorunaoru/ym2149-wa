@@ -30,24 +30,67 @@ const PT3_POSITION_LIST_OFFSET = 0xc9;
 const PT3_MIN_SIZE = 0xc9 + 1; // Header + at least 1 position
 
 /**
- * Parse a PT3 file from raw bytes
+ * Find the offset of a second PT3 module in a TurboSound file
+ * Returns -1 if not found
  */
-export function parsePt3File(data: Uint8Array): Pt3File {
-  if (data.length < PT3_MIN_SIZE) {
-    throw new Error(`PT3 file too small: ${data.length} bytes (minimum ${PT3_MIN_SIZE})`);
+function findSecondModuleOffset(data: Uint8Array): number {
+  // Search for "Vortex Tracker" or "ProTracker" header starting after the first header
+  // The minimum first module size is around 256 bytes, so start searching there
+  const searchStart = 256;
+
+  for (let i = searchStart; i < data.length - PT3_MIN_SIZE; i++) {
+    // Check for "Vortex" signature
+    if (
+      data[i] === 0x56 &&
+      data[i + 1] === 0x6f &&
+      data[i + 2] === 0x72 &&
+      data[i + 3] === 0x74 &&
+      data[i + 4] === 0x65 &&
+      data[i + 5] === 0x78
+    ) {
+      return i;
+    }
+    // Check for "ProTr" signature
+    if (
+      data[i] === 0x50 &&
+      data[i + 1] === 0x72 &&
+      data[i + 2] === 0x6f &&
+      data[i + 3] === 0x54 &&
+      data[i + 4] === 0x72
+    ) {
+      return i;
+    }
   }
 
-  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  return -1;
+}
+
+/**
+ * Parse a single PT3 module from raw bytes at given offset
+ */
+function parsePt3Module(data: Uint8Array, offset: number = 0, length?: number): Pt3File {
+  // Create a view of just this module's data
+  const moduleData = length
+    ? new Uint8Array(data.buffer, data.byteOffset + offset, length)
+    : new Uint8Array(data.buffer, data.byteOffset + offset);
+
+  if (moduleData.length < PT3_MIN_SIZE) {
+    throw new Error(
+      `PT3 module too small: ${moduleData.length} bytes (minimum ${PT3_MIN_SIZE})`,
+    );
+  }
+
+  const view = new DataView(moduleData.buffer, moduleData.byteOffset, moduleData.byteLength);
 
   // Parse header string to extract title, author, and version
-  const headerStr = parseString(data, PT3_MUSIC_NAME_OFFSET, PT3_MUSIC_NAME_LENGTH);
+  const headerStr = parseString(moduleData, PT3_MUSIC_NAME_OFFSET, PT3_MUSIC_NAME_LENGTH);
   const { title, author, version } = parseHeaderString(headerStr);
 
   // Read basic header fields
-  const toneTableId = (data[PT3_TONE_TABLE_OFFSET] & 0x03) as ToneTableId;
-  const delay = data[PT3_DELAY_OFFSET];
-  const numberOfPositions = data[PT3_POSITIONS_COUNT_OFFSET];
-  const loopPosition = data[PT3_LOOP_POSITION_OFFSET];
+  const toneTableId = (moduleData[PT3_TONE_TABLE_OFFSET] & 0x03) as ToneTableId;
+  const delay = moduleData[PT3_DELAY_OFFSET];
+  const numberOfPositions = moduleData[PT3_POSITIONS_COUNT_OFFSET];
+  const loopPosition = moduleData[PT3_LOOP_POSITION_OFFSET];
   const patternsPointer = view.getUint16(PT3_PATTERNS_POINTER_OFFSET, true);
 
   // Read sample pointers (32 samples)
@@ -65,8 +108,12 @@ export function parsePt3File(data: Uint8Array): Pt3File {
   // Read position list (terminated by 0xFF or end of reasonable range)
   const positionList: number[] = [];
   let posOffset = PT3_POSITION_LIST_OFFSET;
-  while (posOffset < data.length && data[posOffset] !== 0xff && positionList.length < 256) {
-    positionList.push(data[posOffset]);
+  while (
+    posOffset < moduleData.length &&
+    moduleData[posOffset] !== 0xff &&
+    positionList.length < 256
+  ) {
+    positionList.push(moduleData[posOffset]);
     posOffset++;
   }
 
@@ -78,13 +125,13 @@ export function parsePt3File(data: Uint8Array): Pt3File {
   }
 
   // Parse patterns
-  const patterns = parsePatterns(data, patternsPointer, positionList);
+  const patterns = parsePatterns(moduleData, patternsPointer, positionList);
 
   // Parse samples
-  const samples = parseSamples(data, samplePointers);
+  const samples = parseSamples(moduleData, samplePointers);
 
   // Parse ornaments
-  const ornaments = parseOrnaments(data, ornamentPointers);
+  const ornaments = parseOrnaments(moduleData, ornamentPointers);
 
   return {
     version,
@@ -99,6 +146,35 @@ export function parsePt3File(data: Uint8Array): Pt3File {
     patterns,
     positionList,
   };
+}
+
+/**
+ * Parse a PT3 file from raw bytes
+ * Automatically detects and handles TurboSound files (two PT3 modules concatenated)
+ */
+export function parsePt3File(data: Uint8Array): Pt3File {
+  if (data.length < PT3_MIN_SIZE) {
+    throw new Error(`PT3 file too small: ${data.length} bytes (minimum ${PT3_MIN_SIZE})`);
+  }
+
+  // Check for TurboSound (two concatenated PT3 modules)
+  const secondModuleOffset = findSecondModuleOffset(data);
+
+  if (secondModuleOffset > 0) {
+    // TurboSound file detected - parse both modules
+    const firstModuleLength = secondModuleOffset;
+    const firstModule = parsePt3Module(data, 0, firstModuleLength);
+    const secondModule = parsePt3Module(data, secondModuleOffset);
+
+    // Mark as TurboSound and attach second module
+    firstModule.isTurboSound = true;
+    firstModule.secondModule = secondModule;
+
+    return firstModule;
+  }
+
+  // Single module file
+  return parsePt3Module(data, 0);
 }
 
 /**

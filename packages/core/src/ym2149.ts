@@ -21,65 +21,74 @@ export interface YM2149State {
 }
 
 /**
+ * Configuration options for YM2149 constructor
+ */
+export interface YM2149Options {
+  /** AudioContext to use for the worklet (required) */
+  audioContext: AudioContext;
+
+  /** Destination node to connect worklet output to (required) */
+  destination: AudioNode;
+}
+
+/**
  * Main YM2149 emulator class using AudioWorklet
+ *
+ * Now accepts external AudioContext and destination for pluggable audio routing.
+ * Outputs stereo audio with per-channel panning support.
  */
 export class YM2149 {
-  private ctx: AudioContext | null = null;
+  /** The AudioContext this chip uses */
+  readonly audioContext: AudioContext;
+
+  /** The destination node this chip connects to */
+  private readonly destination: AudioNode;
+
   private workletNode: AudioWorkletNode | null = null;
-  private masterGain: GainNode | null = null;
   private workletReady = false;
   private pendingMessages: Array<Record<string, unknown>> = [];
-  private initialVolume = 0.5;
 
   // SharedArrayBuffer for real-time channel levels (visualization)
   private levelsBuffer: SharedArrayBuffer | null = null;
   private levelsView: Float32Array | null = null;
 
-  /**
-   * Initialize AudioContext on first user interaction.
-   * iOS Safari requires AudioContext to be created in response to a user gesture.
-   */
-  private initAudioContext(): void {
-    if (this.ctx) return;
+  // Track which AudioContexts have loaded the worklet module
+  private static loadedContexts = new WeakSet<AudioContext>();
 
-    this.ctx = new AudioContext();
-    this.masterGain = new GainNode(this.ctx, { gain: this.initialVolume });
-    this.masterGain.connect(this.ctx.destination);
-  }
-
-  get audioContext(): AudioContext | null {
-    return this.ctx;
-  }
-
-  /**
-   * Set master volume (0.0 to 1.0)
-   */
-  setMasterVolume(volume: number): void {
-    const clamped = Math.max(0, Math.min(1, volume));
-    this.initialVolume = clamped;
-    if (this.masterGain) {
-      this.masterGain.gain.value = clamped;
+  constructor(options: YM2149Options) {
+    if (!options.audioContext) {
+      throw new Error('YM2149 requires an AudioContext');
     }
+    if (!options.destination) {
+      throw new Error('YM2149 requires a destination AudioNode');
+    }
+
+    this.audioContext = options.audioContext;
+    this.destination = options.destination;
   }
 
   /**
    * Initialize the AudioWorklet processor
-   * Must be called after initAudioContext()
    */
   private async initWorklet(): Promise<void> {
-    if (this.workletReady || !this.ctx || !this.masterGain) return;
+    if (this.workletReady) {
+      return;
+    }
 
-    // Load worklet from separate file (Vite handles the URL correctly)
-    const workletUrl = new URL('./processor.js', import.meta.url);
-    await this.ctx.audioWorklet.addModule(workletUrl);
+    // Only load worklet module once per AudioContext
+    if (!YM2149.loadedContexts.has(this.audioContext)) {
+      const workletUrl = new URL('./processor.js', import.meta.url);
+      await this.audioContext.audioWorklet.addModule(workletUrl);
+      YM2149.loadedContexts.add(this.audioContext);
+    }
 
-    this.workletNode = new AudioWorkletNode(this.ctx, 'ym2149-processor', {
+    this.workletNode = new AudioWorkletNode(this.audioContext, 'ym2149-processor', {
       numberOfInputs: 0,
       numberOfOutputs: 1,
-      outputChannelCount: [1],
+      outputChannelCount: [2], // Stereo output
     });
 
-    this.workletNode.connect(this.masterGain);
+    this.workletNode.connect(this.destination);
     this.workletReady = true;
 
     // Initialize SharedArrayBuffer for real-time channel levels
@@ -109,9 +118,8 @@ export class YM2149 {
   }
 
   async start(): Promise<void> {
-    this.initAudioContext();
-    if (this.ctx!.state === 'suspended') {
-      await this.ctx!.resume();
+    if (this.audioContext.state === 'suspended') {
+      await this.audioContext.resume();
     }
     await this.initWorklet();
   }
@@ -124,15 +132,17 @@ export class YM2149 {
     this.workletReady = false;
     this.levelsBuffer = null;
     this.levelsView = null;
+    // Note: We do NOT close the AudioContext - we don't own it
+  }
 
-    if (this.masterGain) {
-      this.masterGain.disconnect();
-      this.masterGain = null;
-    }
-
-    if (this.ctx) {
-      await this.ctx.close();
-      this.ctx = null;
+  /**
+   * Set stereo pan position for a channel
+   * @param channel - Channel index (0=A, 1=B, 2=C)
+   * @param pan - Pan position from -1 (left) to +1 (right), 0 = center
+   */
+  setChannelPan(channel: number, pan: number): void {
+    if (channel >= 0 && channel < 3) {
+      this.postMessage({ type: 'setChannelPan', channel, pan });
     }
   }
 
@@ -386,7 +396,9 @@ export class YM2149 {
       this.workletNode.disconnect();
       this.workletNode = null;
     }
-    this.masterGain?.disconnect();
-    this.ctx?.close();
+    this.workletReady = false;
+    this.levelsBuffer = null;
+    this.levelsView = null;
+    // Note: We do NOT close the AudioContext - we don't own it
   }
 }

@@ -45,6 +45,7 @@ export function YmPlayer({
   onError,
   className,
 }: YmPlayerProps) {
+  const audioContextRef = useRef<AudioContext | null>(null);
   const ymReplayerRef = useRef<YmReplayer | null>(null);
   const pt3ReplayerRef = useRef<Pt3Replayer | null>(null);
   const activeReplayerRef = useRef<Replayer | null>(null);
@@ -84,10 +85,15 @@ export function YmPlayer({
     },
   };
 
-  // Initialize both replayers
-  useEffect(() => {
-    const ymReplayer = new YmReplayer();
-    const pt3Replayer = new Pt3Replayer();
+  // Lazily initialize AudioContext and replayers on first user interaction
+  const ensureAudioContext = useCallback(() => {
+    if (audioContextRef.current) return;
+
+    const audioContext = new AudioContext();
+    audioContextRef.current = audioContext;
+
+    const ymReplayer = new YmReplayer({ audioContext });
+    const pt3Replayer = new Pt3Replayer({ audioContext });
 
     ymReplayerRef.current = ymReplayer;
     pt3ReplayerRef.current = pt3Replayer;
@@ -95,12 +101,16 @@ export function YmPlayer({
     ymReplayer.setCallbacks(replayerCallbacks);
     pt3Replayer.setCallbacks(replayerCallbacks);
 
-    ymReplayer.setMasterVolume(initialVolume / 100);
-    pt3Replayer.setMasterVolume(initialVolume / 100);
+    ymReplayer.setMasterVolume(volumeRef.current / 100);
+    pt3Replayer.setMasterVolume(volumeRef.current / 100);
+  }, []);
 
+  // Cleanup on unmount
+  useEffect(() => {
     return () => {
-      ymReplayer.dispose();
-      pt3Replayer.dispose();
+      ymReplayerRef.current?.dispose();
+      pt3ReplayerRef.current?.dispose();
+      audioContextRef.current?.close();
     };
   }, []);
 
@@ -118,6 +128,9 @@ export function YmPlayer({
   const loadTrack = useCallback(
     async (index: number) => {
       if (index < 0 || index >= tracks.length) return;
+
+      // Initialize AudioContext on first user interaction
+      ensureAudioContext();
 
       const track = tracks[index];
       const isPt3 = isPt3File(track.filename);
@@ -210,7 +223,7 @@ export function YmPlayer({
         console.error(err);
       }
     },
-    [tracks, basePath, onTrackChange, onError],
+    [tracks, basePath, onTrackChange, onError, ensureAudioContext],
   );
 
   // Auto-play first track

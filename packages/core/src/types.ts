@@ -9,10 +9,13 @@
 export type { YmFormat, YmHeader, YmMetadata, YmFile } from './parser';
 
 // YM2149 State Types
-export type { ChannelState, YM2149State } from './ym2149';
+export type { ChannelState, YM2149State, YM2149Options } from './ym2149';
+
+// TurboSound Types
+export type { TurboSoundOptions } from './turbosound';
 
 // Replayer Types
-export type { ReplayerState, ReplayerCallbacks } from './replayer';
+export type { ReplayerState, ReplayerCallbacks, YmReplayerOptions } from './replayer';
 
 // Effect Types
 export type { EffectType, Effect } from './effects';

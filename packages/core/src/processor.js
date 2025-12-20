@@ -322,6 +322,12 @@ class YM2149Processor extends AudioWorkletProcessor {
     this.syncBuzzerPhase = 0;
     this.syncBuzzerStep = 0;
 
+    // Per-channel stereo panning (-1 = left, 0 = center, +1 = right)
+    this.channelPan = [0, 0, 0];
+    // Pre-computed panning gains (L/R per channel)
+    this.panGainsL = [Math.SQRT1_2, Math.SQRT1_2, Math.SQRT1_2];
+    this.panGainsR = [Math.SQRT1_2, Math.SQRT1_2, Math.SQRT1_2];
+
     // SharedArrayBuffer for real-time channel levels (visualization)
     this.channelLevels = null; // Float32Array view into SharedArrayBuffer
 
@@ -433,19 +439,36 @@ class YM2149Processor extends AudioWorkletProcessor {
         // msg.buffer is a SharedArrayBuffer (3 floats = 12 bytes)
         this.channelLevels = new Float32Array(msg.buffer);
         break;
+
+      // Per-channel stereo panning
+      case 'setChannelPan':
+        // msg: { channel, pan } where pan is -1 (left) to +1 (right)
+        if (msg.channel >= 0 && msg.channel < 3) {
+          const pan = Math.max(-1, Math.min(1, msg.pan));
+          this.channelPan[msg.channel] = pan;
+          // Constant-power panning: angle maps -1..+1 to 0..π/2
+          const angle = (pan + 1) * Math.PI / 4;
+          this.panGainsL[msg.channel] = Math.cos(angle);
+          this.panGainsR[msg.channel] = Math.sin(angle);
+        }
+        break;
     }
   }
 
   process(inputs, outputs, parameters) {
     const output = outputs[0];
-    const channel = output[0];
+    const channelL = output[0];
+    const channelR = output[1];
 
-    if (!channel) return true;
+    if (!channelL) return true;
 
     // Track peak levels per channel for visualization
     let peakLevels = [0, 0, 0];
 
-    for (let i = 0; i < channel.length; i++) {
+    // Get buffer length (use L channel, R may be undefined if mono destination)
+    const bufferLength = channelL.length;
+
+    for (let i = 0; i < bufferLength; i++) {
       // === Handle Sync Buzzer (envelope retriggering) ===
       if (this.syncBuzzerEnabled) {
         const oldPhase = this.syncBuzzerPhase;
@@ -488,7 +511,9 @@ class YM2149Processor extends AudioWorkletProcessor {
       const envLevel = this.envelope.getLevel();
 
       // Mix channels using AND gate logic (like real hardware)
-      let mixedOutput = 0;
+      // Now with stereo panning support
+      let mixedL = 0;
+      let mixedR = 0;
 
       for (let ch = 0; ch < 3; ch++) {
         let channelOutput = 0;
@@ -513,7 +538,9 @@ class YM2149Processor extends AudioWorkletProcessor {
           }
         }
 
-        mixedOutput += channelOutput;
+        // Apply stereo panning
+        mixedL += channelOutput * this.panGainsL[ch];
+        mixedR += channelOutput * this.panGainsR[ch];
 
         // Track peak level for this channel
         if (channelOutput > peakLevels[ch]) {
@@ -521,8 +548,11 @@ class YM2149Processor extends AudioWorkletProcessor {
         }
       }
 
-      // Normalize (3 channels max)
-      channel[i] = mixedOutput / 3;
+      // Normalize (3 channels max) and write to stereo output
+      channelL[i] = mixedL / 3;
+      if (channelR) {
+        channelR[i] = mixedR / 3;
+      }
     }
 
     // Write peak levels to SharedArrayBuffer for visualization

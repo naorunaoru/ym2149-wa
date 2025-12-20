@@ -15,10 +15,29 @@ export interface ReplayerCallbacks {
 }
 
 /**
+ * Configuration options for YmReplayer
+ */
+export interface YmReplayerOptions {
+  /** AudioContext to use (required) */
+  audioContext: AudioContext;
+
+  /** Destination node for audio output (defaults to audioContext.destination) */
+  destination?: AudioNode;
+
+  /** Optional pre-configured YM2149 instance (for TurboSound scenarios) */
+  chip?: YM2149;
+}
+
+/**
  * YM file replayer
  */
 export class YmReplayer {
-  private ym: YM2149;
+  /** The AudioContext this replayer uses */
+  readonly audioContext: AudioContext;
+
+  private readonly ym: YM2149;
+  private readonly ownsChip: boolean;
+  private readonly masterGain: GainNode;
   private ymFile: YmFile | null = null;
   private currentFrame = 0;
   private state: ReplayerState = 'stopped';
@@ -30,19 +49,47 @@ export class YmReplayer {
   private activeDrum: [boolean, boolean, boolean] = [false, false, false];
   private activeSyncBuzzer = false;
 
-  constructor() {
-    this.ym = new YM2149();
-  }
+  constructor(options: YmReplayerOptions) {
+    if (!options.audioContext) {
+      throw new Error('YmReplayer requires an AudioContext');
+    }
 
-  get audioContext(): AudioContext | null {
-    return this.ym.audioContext;
+    this.audioContext = options.audioContext;
+
+    // Create master gain for volume control
+    this.masterGain = new GainNode(this.audioContext, { gain: 0.5 });
+    const destination = options.destination ?? this.audioContext.destination;
+    this.masterGain.connect(destination);
+
+    if (options.chip) {
+      // Use provided chip (e.g., from TurboSound)
+      this.ym = options.chip;
+      this.ownsChip = false;
+    } else {
+      // Create our own chip
+      this.ym = new YM2149({
+        audioContext: this.audioContext,
+        destination: this.masterGain,
+      });
+      this.ownsChip = true;
+    }
   }
 
   /**
    * Set master volume (0.0 to 1.0)
    */
   setMasterVolume(volume: number): void {
-    this.ym.setMasterVolume(volume);
+    const clamped = Math.max(0, Math.min(1, volume));
+    this.masterGain.gain.value = clamped;
+  }
+
+  /**
+   * Set stereo pan position for a channel
+   * @param channel - Channel index (0=A, 1=B, 2=C)
+   * @param pan - Pan position from -1 (left) to +1 (right), 0 = center
+   */
+  setChannelPan(channel: number, pan: number): void {
+    this.ym.setChannelPan(channel, pan);
   }
 
   setCallbacks(callbacks: ReplayerCallbacks): void {
@@ -158,7 +205,10 @@ export class YmReplayer {
     this.ym.setChannelVolume(1, 0);
     this.ym.setChannelVolume(2, 0);
 
-    await this.ym.stop();
+    // Only stop the chip if we own it
+    if (this.ownsChip) {
+      await this.ym.stop();
+    }
   }
 
   /**
@@ -357,6 +407,9 @@ export class YmReplayer {
    */
   dispose(): void {
     this.stop();
-    this.ym.dispose();
+    if (this.ownsChip) {
+      this.ym.dispose();
+    }
+    this.masterGain.disconnect();
   }
 }

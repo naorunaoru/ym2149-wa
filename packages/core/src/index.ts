@@ -46,6 +46,9 @@ export { YmReplayer } from './replayer';
 /** Low-level YM2149 PSG chip emulator */
 export { YM2149 } from './ym2149';
 
+/** TurboSound dual-chip configuration */
+export { TurboSound } from './turbosound';
+
 /** Hardware envelope generator (internal use) */
 export { EnvelopeGenerator } from './envelope';
 
@@ -97,9 +100,13 @@ export type {
   // YM2149 state types
   ChannelState,
   YM2149State,
+  YM2149Options,
+  // TurboSound types
+  TurboSoundOptions,
   // Replayer types
   ReplayerState,
   ReplayerCallbacks,
+  YmReplayerOptions,
   // Effect types
   EffectType,
   Effect,
@@ -119,4 +126,5 @@ export type {
   AyRegisters,
   Pt3ReplayerState,
   Pt3ReplayerCallbacks,
+  Pt3ReplayerOptions,
 } from './pt3';

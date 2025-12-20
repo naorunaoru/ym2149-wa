@@ -42,4 +42,4 @@ export { Pt3Player } from './player';
 
 // Replayer
 export { Pt3Replayer } from './replayer';
-export type { Pt3ReplayerState, Pt3ReplayerCallbacks } from './replayer';
+export type { Pt3ReplayerState, Pt3ReplayerCallbacks, Pt3ReplayerOptions } from './replayer';

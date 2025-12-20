@@ -55,6 +55,11 @@ export const tracks: Track[] = [
     "artist": "-"
   },
   {
+    "filename": "DncDick.pt3",
+    "displayName": "Dancing dick",
+    "artist": "krb 2k6"
+  },
+  {
     "filename": "Karboflex.pt3",
     "displayName": "'Karboflex' - Theme of Supaplex",
     "artist": "Karbofos of DrinkLover's 2oo5"
